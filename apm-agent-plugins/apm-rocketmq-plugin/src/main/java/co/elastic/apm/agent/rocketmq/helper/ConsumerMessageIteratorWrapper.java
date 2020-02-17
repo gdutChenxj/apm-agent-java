@@ -51,7 +51,7 @@ public class ConsumerMessageIteratorWrapper implements Iterator<MessageExt> {
 
     private final MessagingConfiguration messagingConfiguration;
 
-    public ConsumerMessageIteratorWrapper(Iterator<MessageExt> delegate, ElasticApmTracer tracer) {
+    ConsumerMessageIteratorWrapper(Iterator<MessageExt> delegate, ElasticApmTracer tracer) {
         this.delegate = delegate;
         this.tracer = tracer;
         this.coreConfiguration = tracer.getConfig(CoreConfiguration.class);
@@ -71,7 +71,8 @@ public class ConsumerMessageIteratorWrapper implements Iterator<MessageExt> {
         try {
             String topic = retMsgExt.getTopic();
             if (!WildcardMatcher.isAnyMatch(messagingConfiguration.getIgnoreMessageQueues(), topic)) {
-                String traceParentProperty = retMsgExt.getUserProperty(TraceContext.TRACE_PARENT_BINARY_HEADER_NAME);
+                // use remove() to get the trace parent property to make it invisible for application.
+                String traceParentProperty = retMsgExt.getProperties().remove(TraceContext.TRACE_PARENT_BINARY_HEADER_NAME);
                 Transaction transaction;
                 if (StringUtils.isEmpty(traceParentProperty)) {
                     transaction = tracer.startTransaction(
@@ -82,6 +83,7 @@ public class ConsumerMessageIteratorWrapper implements Iterator<MessageExt> {
                 } else {
                     transaction = tracer.startRootTransaction(ConsumerMessageIteratorWrapper.class.getClassLoader());
                 }
+                transaction.withType("messaging").withName("RocketMQ#" + topic).activate();
                 Message traceContextMsg = transaction.getContext().getMessage();
                 traceContextMsg.withQueue(topic);
                 traceContextMsg.withAge(System.currentTimeMillis() - retMsgExt.getBornTimestamp());

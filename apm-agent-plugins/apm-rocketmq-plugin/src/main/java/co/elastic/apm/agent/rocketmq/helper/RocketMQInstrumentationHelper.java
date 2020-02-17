@@ -25,12 +25,17 @@
 package co.elastic.apm.agent.rocketmq.helper;
 
 import co.elastic.apm.agent.impl.transaction.Span;
+import org.apache.rocketmq.client.impl.CommunicationMode;
 import org.apache.rocketmq.client.producer.SendCallback;
+import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.common.message.MessageExt;
+import org.apache.rocketmq.common.message.MessageQueue;
 
 import java.util.List;
 
 public interface RocketMQInstrumentationHelper {
+
+    Span onSendStart(Message msg, MessageQueue mq, CommunicationMode communicationMode);
 
     SendCallback wrapSendCallback(SendCallback delegate, Span span);
 

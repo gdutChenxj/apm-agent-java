@@ -27,8 +27,6 @@ package co.elastic.apm.agent.rocketmq;
 import co.elastic.apm.agent.bci.VisibleForAdvice;
 import co.elastic.apm.agent.impl.ElasticApmTracer;
 import co.elastic.apm.agent.impl.transaction.Span;
-import co.elastic.apm.agent.impl.transaction.TraceContext;
-import co.elastic.apm.agent.impl.transaction.TraceContextHolder;
 import co.elastic.apm.agent.rocketmq.helper.RocketMQInstrumentationHelper;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.description.method.MethodDescription;
@@ -39,8 +37,6 @@ import org.apache.rocketmq.client.producer.MQProducer;
 import org.apache.rocketmq.client.producer.SendCallback;
 import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.common.message.MessageQueue;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -48,8 +44,6 @@ import java.util.Collection;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 
 public class RocketMQProducerInstrumentation extends BaseRocketMQInstrumentation {
-
-    private static Logger logger = LoggerFactory.getLogger(RocketMQProducerInstrumentation.class);
 
     public RocketMQProducerInstrumentation(ElasticApmTracer tracer) {
         super(tracer);
@@ -89,43 +83,21 @@ public class RocketMQProducerInstrumentation extends BaseRocketMQInstrumentation
                 return;
             }
 
-            final TraceContextHolder<?> parent = tracer.getActive();
-
-            if (null == parent) {
-                return ;
-            }
-
-            span = parent.createExitSpan();
-            if (null == span) {
+            if (helperClassManager == null) {
                 return;
             }
-
             final RocketMQInstrumentationHelper helper = helperClassManager.getForClassLoaderOfClass(MQProducer.class);
             if (helper == null) {
                 return;
             }
 
-            String topic = msg.getTopic();
+            span = helper.onSendStart(msg, mq, communicationMode);
 
-            span.withType("messaging").withSubtype("rocketmq").withAction("send/" + communicationMode);
-            span.withName("DefaultMQProducerImpl#sendKernelImpl");
-            span.getContext().getMessage().withQueue(topic + "/" + mq.getBrokerName() + "/" + mq.getQueueId());
-            span.getContext().getDestination().getService().withType("messaging").withName("rocketmq")
-                .getResource().append("rocketmq/").append(topic);
-
-            try {
-                msg.putUserProperty(TraceContext.TRACE_PARENT_BINARY_HEADER_NAME,
-                    span.getTraceContext().getOutgoingTraceParentTextHeader().toString());
-            } catch (Exception exp) {
-               if (logger.isDebugEnabled()) {
-                   logger.debug("Failed to add user property to rocketmq message {} because {}", msg, exp.getMessage());
-               }
+            if (span == null) {
+                return;
             }
 
             sendCallback = helper.wrapSendCallback(sendCallback, span);
-
-            span.activate();
-
         }
 
         @Advice.OnMethodExit(suppress = Throwable.class)

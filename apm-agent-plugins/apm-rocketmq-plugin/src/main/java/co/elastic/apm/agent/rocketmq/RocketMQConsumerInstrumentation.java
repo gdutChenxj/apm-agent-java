@@ -43,7 +43,6 @@ import static net.bytebuddy.matcher.ElementMatchers.named;
 
 public class RocketMQConsumerInstrumentation extends BaseRocketMQInstrumentation {
 
-
     public RocketMQConsumerInstrumentation(ElasticApmTracer tracer) {
         super(tracer);
     }
@@ -78,8 +77,11 @@ public class RocketMQConsumerInstrumentation extends BaseRocketMQInstrumentation
                 return;
             }
 
-            if (ret != null) {
+            if (ret != null && helperClassManager != null) {
                 final RocketMQInstrumentationHelper helper = helperClassManager.getForClassLoaderOfClass(MQProducer.class);
+                if (helper == null) {
+                    return;
+                }
                 ret = helper.wrapMsgFoundList(ret);
             }
         }

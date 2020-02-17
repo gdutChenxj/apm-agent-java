@@ -41,7 +41,7 @@ public class ConsumerMessageListWrapper implements List<MessageExt> {
     @Nonnull
     private final ElasticApmTracer tracer;
 
-    public ConsumerMessageListWrapper(List<MessageExt> delegate, ElasticApmTracer tracer) {
+    ConsumerMessageListWrapper(List<MessageExt> delegate, ElasticApmTracer tracer) {
         this.delegate = delegate;
         this.tracer = tracer;
     }

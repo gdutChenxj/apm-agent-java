@@ -27,23 +27,23 @@ package co.elastic.apm.agent.rocketmq;
 import co.elastic.apm.agent.bci.ElasticApmInstrumentation;
 import co.elastic.apm.agent.bci.HelperClassManager;
 import co.elastic.apm.agent.impl.ElasticApmTracer;
-import co.elastic.apm.agent.rocketmq.helper.*;
+import co.elastic.apm.agent.rocketmq.helper.RocketMQInstrumentationHelper;
 
 public abstract class BaseRocketMQInstrumentation extends ElasticApmInstrumentation {
 
     public static HelperClassManager<RocketMQInstrumentationHelper> helperClassManager;
 
     BaseRocketMQInstrumentation(ElasticApmTracer tracer) {
-        init(tracer);
+        BaseRocketMQInstrumentation.init(tracer);
     }
 
     private synchronized static void init(ElasticApmTracer tracer) {
-        if (helperClassManager != null) {
+        if (helperClassManager == null) {
             helperClassManager = HelperClassManager.ForAnyClassLoader.of(tracer,
-                RocketMQInstrumentationHelperImpl.class.getName(),
-                SendCallbackWrapper.class.getName(),
-                ConsumerMessageListWrapper.class.getName(),
-                ConsumerMessageIteratorWrapper.class.getName());
+                "co.elastic.apm.agent.rocketmq.helper.RocketMQInstrumentationHelperImpl",
+                "co.elastic.apm.agent.rocketmq.helper.SendCallbackWrapper",
+                "co.elastic.apm.agent.rocketmq.helper.ConsumerMessageListWrapper",
+                "co.elastic.apm.agent.rocketmq.helper.ConsumerMessageIteratorWrapper");
         }
     }
 

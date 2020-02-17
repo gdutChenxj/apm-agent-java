@@ -24,19 +24,75 @@
  */
 package co.elastic.apm.agent.rocketmq.helper;
 
+import co.elastic.apm.agent.configuration.MessagingConfiguration;
 import co.elastic.apm.agent.impl.ElasticApmTracer;
 import co.elastic.apm.agent.impl.transaction.Span;
+import co.elastic.apm.agent.impl.transaction.TraceContext;
+import co.elastic.apm.agent.impl.transaction.TraceContextHolder;
+import co.elastic.apm.agent.matcher.WildcardMatcher;
+import org.apache.rocketmq.client.impl.CommunicationMode;
 import org.apache.rocketmq.client.producer.SendCallback;
+import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.common.message.MessageExt;
+import org.apache.rocketmq.common.message.MessageQueue;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
 public class RocketMQInstrumentationHelperImpl implements RocketMQInstrumentationHelper {
 
+    private static final Logger logger = LoggerFactory.getLogger(RocketMQInstrumentationHelperImpl.class);
+
     private final ElasticApmTracer tracer;
+
+    private final MessagingConfiguration messagingConfiguration;
 
     public RocketMQInstrumentationHelperImpl(ElasticApmTracer tracer) {
         this.tracer = tracer;
+        this.messagingConfiguration = tracer.getConfig(MessagingConfiguration.class);
+    }
+
+    @Override
+    public Span onSendStart(Message msg, MessageQueue mq, CommunicationMode communicationMode) {
+        String topic = msg.getTopic();
+        if (ignoreTopic(topic)) {
+            return null;
+        }
+
+        final TraceContextHolder<?> parent = tracer.getActive();
+
+        if (null == parent) {
+            return null;
+        }
+
+        Span span = parent.createExitSpan();
+        if (null == span) {
+            return null;
+        }
+
+        span.withType("messaging").withSubtype("rocketmq").withAction("send/" + communicationMode);
+        span.withName("DefaultMQProducerImpl#sendKernelImpl");
+        span.getContext().getMessage().withQueue(topic + "/" + mq.getBrokerName() + "/" + mq.getQueueId());
+        span.getContext().getDestination().getService().withType("messaging").withName("rocketmq")
+            .getResource().append("rocketmq/").append(topic);
+
+        try {
+            msg.putUserProperty(TraceContext.TRACE_PARENT_BINARY_HEADER_NAME,
+                span.getTraceContext().getOutgoingTraceParentTextHeader().toString());
+        } catch (Exception exp) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Failed to add user property to rocketmq message {} because {}", msg, exp.getMessage());
+            }
+        }
+
+        span.activate();
+
+        return span;
+    }
+
+    private boolean ignoreTopic(String topic) {
+        return WildcardMatcher.isAnyMatch(messagingConfiguration.getIgnoreMessageQueues(), topic);
     }
 
     @Override
