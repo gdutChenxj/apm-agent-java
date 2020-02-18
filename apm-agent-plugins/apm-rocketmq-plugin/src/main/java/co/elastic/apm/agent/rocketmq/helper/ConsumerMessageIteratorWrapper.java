@@ -72,7 +72,7 @@ public class ConsumerMessageIteratorWrapper implements Iterator<MessageExt> {
             String topic = retMsgExt.getTopic();
             if (!WildcardMatcher.isAnyMatch(messagingConfiguration.getIgnoreMessageQueues(), topic)) {
                 // use remove() to get the trace parent property to make it invisible for application.
-                String traceParentProperty = retMsgExt.getProperties().remove(TraceContext.TRACE_PARENT_BINARY_HEADER_NAME);
+                String traceParentProperty = retMsgExt.getProperties().remove(TraceContext.TRACE_PARENT_TEXTUAL_HEADER_NAME);
                 Transaction transaction;
                 if (StringUtils.isEmpty(traceParentProperty)) {
                     transaction = tracer.startTransaction(
@@ -91,7 +91,7 @@ public class ConsumerMessageIteratorWrapper implements Iterator<MessageExt> {
                 if (transaction.isSampled() && coreConfiguration.isCaptureHeaders()) {
                     for (Map.Entry<String, String> property: retMsgExt.getProperties().entrySet()) {
                         String propertyKey = property.getKey();
-                        if (!TraceContext.TRACE_PARENT_BINARY_HEADER_NAME.equals(propertyKey) &&
+                        if (!TraceContext.TRACE_PARENT_TEXTUAL_HEADER_NAME.equals(propertyKey) &&
                             WildcardMatcher.anyMatch(coreConfiguration.getSanitizeFieldNames(), propertyKey) == null) {
                             traceContextMsg.addHeader(propertyKey, property.getValue());
                         }

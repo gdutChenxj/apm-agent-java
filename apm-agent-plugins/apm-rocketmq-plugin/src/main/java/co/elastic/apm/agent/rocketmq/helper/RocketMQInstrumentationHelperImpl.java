@@ -71,14 +71,14 @@ public class RocketMQInstrumentationHelperImpl implements RocketMQInstrumentatio
             return null;
         }
 
-        span.withType("messaging").withSubtype("rocketmq").withAction("send/" + communicationMode);
+        span.withType("messaging").withSubtype("rocketmq").withAction("send/" + communicationMode.name().toLowerCase());
         span.withName("DefaultMQProducerImpl#sendKernelImpl");
         span.getContext().getMessage().withQueue(topic + "/" + mq.getBrokerName() + "/" + mq.getQueueId());
         span.getContext().getDestination().getService().withType("messaging").withName("rocketmq")
             .getResource().append("rocketmq/").append(topic);
 
         try {
-            msg.putUserProperty(TraceContext.TRACE_PARENT_BINARY_HEADER_NAME,
+            msg.putUserProperty(TraceContext.TRACE_PARENT_TEXTUAL_HEADER_NAME,
                 span.getTraceContext().getOutgoingTraceParentTextHeader().toString());
         } catch (Exception exp) {
             if (logger.isDebugEnabled()) {
