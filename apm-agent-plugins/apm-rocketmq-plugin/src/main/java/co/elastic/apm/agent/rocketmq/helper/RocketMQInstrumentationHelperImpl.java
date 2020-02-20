@@ -25,11 +25,14 @@
 package co.elastic.apm.agent.rocketmq.helper;
 
 import co.elastic.apm.agent.configuration.MessagingConfiguration;
+import co.elastic.apm.agent.configuration.RocketMQConfiguration;
 import co.elastic.apm.agent.impl.ElasticApmTracer;
 import co.elastic.apm.agent.impl.transaction.Span;
 import co.elastic.apm.agent.impl.transaction.TraceContext;
 import co.elastic.apm.agent.impl.transaction.TraceContextHolder;
+import co.elastic.apm.agent.impl.transaction.Transaction;
 import co.elastic.apm.agent.matcher.WildcardMatcher;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.rocketmq.client.impl.CommunicationMode;
 import org.apache.rocketmq.client.producer.SendCallback;
 import org.apache.rocketmq.common.message.Message;
@@ -71,8 +74,10 @@ public class RocketMQInstrumentationHelperImpl implements RocketMQInstrumentatio
             return null;
         }
 
-        span.withType("messaging").withSubtype("rocketmq").withAction("send/" + communicationMode.name().toLowerCase());
-        span.withName("DefaultMQProducerImpl#sendKernelImpl");
+        span.withType("messaging")
+            .withSubtype("rocketmq")
+            .withAction("send/" + communicationMode.name().toLowerCase())
+            .withName("DefaultMQProducerImpl#sendKernelImpl");
         span.getContext().getMessage().withQueue(topic + "/" + mq.getBrokerName() + "/" + mq.getQueueId());
         span.getContext().getDestination().getService().withType("messaging").withName("rocketmq")
             .getResource().append("rocketmq/").append(topic);
@@ -104,6 +109,35 @@ public class RocketMQInstrumentationHelperImpl implements RocketMQInstrumentatio
             return delegate;
         }
         return new SendCallbackWrapper(delegate, span);
+    }
+
+    @Override
+    public void onMessageListenerConsume(List<MessageExt> msgs, RocketMQConfiguration.ConsumerStrategy strategy) {
+        MessageExt firstMsgExt = msgs.get(0);
+
+        try {
+            String topic = firstMsgExt.getTopic();
+            if (!ignoreTopic(topic)) {
+                // use remove() to get the trace parent property to make it invisible for application.
+                String traceParentProperty = firstMsgExt.getProperties().remove(TraceContext.TRACE_PARENT_TEXTUAL_HEADER_NAME);
+                Transaction transaction;
+                if (StringUtils.isEmpty(traceParentProperty)) {
+                    transaction = tracer.startTransaction(
+                        TraceContext.fromTraceparentHeader(),
+                        traceParentProperty,
+                        ConsumerMessageIteratorWrapper.class.getClassLoader()
+                    );
+                } else {
+                    transaction = tracer.startRootTransaction(ConsumerMessageIteratorWrapper.class.getClassLoader());
+                }
+                transaction.withType("messaging").withName("RocketMQ#" + strategy + "#" + topic).activate();
+                co.elastic.apm.agent.impl.context.Message traceContextMsg = transaction.getContext().getMessage();
+                traceContextMsg.withQueue(topic);
+                traceContextMsg.withAge(System.currentTimeMillis() - firstMsgExt.getBornTimestamp());
+            }
+        } catch (Exception e) {
+            logger.error("Error in transaction creation based on RocketMQ message", e);
+        }
     }
 
     @Override

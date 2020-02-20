@@ -41,7 +41,7 @@ public class ConsumerMessageListWrapper implements List<MessageExt> {
     @Nonnull
     private final ElasticApmTracer tracer;
 
-    ConsumerMessageListWrapper(List<MessageExt> delegate, ElasticApmTracer tracer) {
+    public ConsumerMessageListWrapper(List<MessageExt> delegate, ElasticApmTracer tracer) {
         this.delegate = delegate;
         this.tracer = tracer;
     }
@@ -63,7 +63,11 @@ public class ConsumerMessageListWrapper implements List<MessageExt> {
 
     @Override
     public Iterator<MessageExt> iterator() {
-        return new ConsumerMessageIteratorWrapper(delegate.iterator(), tracer);
+        Iterator<MessageExt> delegateIterator = delegate.iterator();
+        if (delegateIterator instanceof ConsumerMessageIteratorWrapper) {
+            return delegateIterator;
+        }
+        return new ConsumerMessageIteratorWrapper(delegateIterator, tracer);
     }
 
     @Override

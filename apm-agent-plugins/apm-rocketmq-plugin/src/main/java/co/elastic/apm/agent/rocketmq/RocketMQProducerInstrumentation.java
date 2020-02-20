@@ -38,9 +38,6 @@ import org.apache.rocketmq.client.producer.SendCallback;
 import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.common.message.MessageQueue;
 
-import java.util.Arrays;
-import java.util.Collection;
-
 import static net.bytebuddy.matcher.ElementMatchers.named;
 
 public class RocketMQProducerInstrumentation extends BaseRocketMQInstrumentation {
@@ -57,11 +54,6 @@ public class RocketMQProducerInstrumentation extends BaseRocketMQInstrumentation
     @Override
     public ElementMatcher<? super MethodDescription> getMethodMatcher() {
         return named("sendKernelImpl");
-    }
-
-    @Override
-    public Collection<String> getInstrumentationGroupNames() {
-        return Arrays.asList("messaging", "rocketmq");
     }
 
     @Override

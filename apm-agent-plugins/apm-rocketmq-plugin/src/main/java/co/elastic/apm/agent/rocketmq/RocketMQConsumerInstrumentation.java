@@ -35,8 +35,6 @@ import org.apache.rocketmq.client.producer.MQProducer;
 import org.apache.rocketmq.common.message.MessageExt;
 
 import javax.annotation.Nullable;
-import java.util.Arrays;
-import java.util.Collection;
 import java.util.List;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
@@ -55,11 +53,6 @@ public class RocketMQConsumerInstrumentation extends BaseRocketMQInstrumentation
     @Override
     public ElementMatcher<? super MethodDescription> getMethodMatcher() {
         return named("getMsgFoundList");
-    }
-
-    @Override
-    public Collection<String> getInstrumentationGroupNames() {
-        return Arrays.asList("messaging", "rocketmq");
     }
 
     @Override

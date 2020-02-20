@@ -1,2 +1,4 @@
 co.elastic.apm.agent.rocketmq.RocketMQProducerInstrumentation
-co.elastic.apm.agent.rocketmq.RocketMQConsumerInstrumentation
+#co.elastic.apm.agent.rocketmq.RocketMQConsumerInstrumentation
+co.elastic.apm.agent.rocketmq.RocketMQOrderlyPushConsumerInstrumentation
+co.elastic.apm.agent.rocketmq.RocketMQConcurrentlyPushConsumerInstrumentation

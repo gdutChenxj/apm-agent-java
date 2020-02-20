@@ -67,6 +67,7 @@ public class ConsumerMessageIteratorWrapper implements Iterator<MessageExt> {
     @Override
     public MessageExt next() {
         endCurrentTransaction();
+
         MessageExt retMsgExt = delegate.next();
         try {
             String topic = retMsgExt.getTopic();
@@ -83,7 +84,7 @@ public class ConsumerMessageIteratorWrapper implements Iterator<MessageExt> {
                 } else {
                     transaction = tracer.startRootTransaction(ConsumerMessageIteratorWrapper.class.getClassLoader());
                 }
-                transaction.withType("messaging").withName("RocketMQ#" + topic).activate();
+                transaction.withType("messaging").withName("RocketMQ#" + topic + "#" + retMsgExt.getMsgId()).activate();
                 Message traceContextMsg = transaction.getContext().getMessage();
                 traceContextMsg.withQueue(topic);
                 traceContextMsg.withAge(System.currentTimeMillis() - retMsgExt.getBornTimestamp());
