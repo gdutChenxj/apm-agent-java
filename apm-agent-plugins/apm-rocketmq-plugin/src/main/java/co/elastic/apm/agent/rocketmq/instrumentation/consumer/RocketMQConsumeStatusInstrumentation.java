@@ -22,18 +22,18 @@
  * under the License.
  * #L%
  */
-package co.elastic.apm.agent.rocketmq;
+package co.elastic.apm.agent.rocketmq.instrumentation.consumer;
 
-import co.elastic.apm.agent.configuration.RocketMQConfiguration;
 import co.elastic.apm.agent.impl.ElasticApmTracer;
 import co.elastic.apm.agent.impl.transaction.Transaction;
 import co.elastic.apm.agent.rocketmq.helper.RocketMQInstrumentationHelper;
+import co.elastic.apm.agent.rocketmq.instrumentation.BaseRocketMQInstrumentation;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
 import org.apache.rocketmq.client.consumer.MQConsumer;
-import org.apache.rocketmq.client.consumer.listener.ConsumeOrderlyStatus;
+import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
 import org.apache.rocketmq.common.message.MessageExt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,17 +43,19 @@ import java.util.List;
 import static net.bytebuddy.matcher.ElementMatchers.hasSuperType;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 
-public class RocketMQOrderlyPushConsumerInstrumentation extends BaseRocketMQInstrumentation {
+public class RocketMQConsumeStatusInstrumentation extends BaseRocketMQInstrumentation {
 
-    private static Logger logger = LoggerFactory.getLogger(RocketMQOrderlyPushConsumerInstrumentation.class);
 
-    public RocketMQOrderlyPushConsumerInstrumentation(ElasticApmTracer tracer) {
+    private static Logger logger = LoggerFactory.getLogger(RocketMQConsumeStatusInstrumentation.class);
+
+    public RocketMQConsumeStatusInstrumentation(ElasticApmTracer tracer) {
         super(tracer);
     }
 
     @Override
     public ElementMatcher<? super TypeDescription> getTypeMatcher() {
-        return hasSuperType(named("org.apache.rocketmq.client.consumer.listener.MessageListenerOrderly"));
+        return hasSuperType(named("org.apache.rocketmq.client.consumer.listener.MessageListenerOrderly")
+            .or(hasSuperType(named("org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently"))));
     }
 
     @Override
@@ -63,14 +65,19 @@ public class RocketMQOrderlyPushConsumerInstrumentation extends BaseRocketMQInst
 
     @Override
     public Class<?> getAdviceClass() {
-        return RocketMQOrderlyPushConsumerAdvice.class;
+        return RocketMQConcurrentlyPushConsumerAdvice.class;
     }
 
-    public static class RocketMQOrderlyPushConsumerAdvice {
+    public static class RocketMQConcurrentlyPushConsumerAdvice {
 
         @Advice.OnMethodEnter(suppress = Throwable.class)
-        public static void onBeforeConsumeMessage(@Advice.Argument(value = 0, readOnly = false) List<MessageExt> msgs) {
+        public static void onBeforeConsumeMessage(@Advice.Local("transaction") Transaction transaction,
+                                                  @Advice.Argument(value = 0, readOnly = false) List<MessageExt> msgs) {
             if (tracer == null || tracer.currentTransaction() != null) {
+                return;
+            }
+
+            if (rocketMQConfig.shouldCollectConsumeProcess()) {
                 return;
             }
 
@@ -80,25 +87,25 @@ public class RocketMQOrderlyPushConsumerInstrumentation extends BaseRocketMQInst
                     return;
                 }
 
-                helper.onMessageListenerConsume(msgs, RocketMQConfiguration.ConsumerStrategy.ORDERLY_PUSH);
+                transaction = helper.onMessageListenerConsume(msgs);
             }
         }
 
         @Advice.OnMethodExit(suppress = Throwable.class)
-        public static void onAfterConsumeMessage(@Advice.Return(readOnly = false) ConsumeOrderlyStatus status) {
+        public static void onAfterConsumeMessage(@Advice.Local("transaction") Transaction transaction,
+                                                 @Advice.Return(readOnly = false) ConsumeConcurrentlyStatus status) {
             if (tracer == null) {
                 return;
             }
             try {
-                Transaction transaction = tracer.currentTransaction();
                 if (transaction != null && "messaging".equals(transaction.getType())) {
-                    if (status == ConsumeOrderlyStatus.SUSPEND_CURRENT_QUEUE_A_MOMENT) {
-                        transaction.addLabel("consume_status", status.name());
+                    if (status == ConsumeConcurrentlyStatus.RECONSUME_LATER) {
+                        transaction.addLabel("consume.status", status.name());
                     }
                     transaction.deactivate().end();
                 }
             } catch (Exception e) {
-                logger.error("Error in RocketMQ iterator wrapper", e);
+                logger.error("Error in RocketMQ consume transaction creation.", e);
             }
         }
 

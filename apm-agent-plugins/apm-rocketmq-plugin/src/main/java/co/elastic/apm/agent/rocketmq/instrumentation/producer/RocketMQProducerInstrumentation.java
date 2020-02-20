@@ -22,12 +22,13 @@
  * under the License.
  * #L%
  */
-package co.elastic.apm.agent.rocketmq;
+package co.elastic.apm.agent.rocketmq.instrumentation.producer;
 
 import co.elastic.apm.agent.bci.VisibleForAdvice;
 import co.elastic.apm.agent.impl.ElasticApmTracer;
 import co.elastic.apm.agent.impl.transaction.Span;
 import co.elastic.apm.agent.rocketmq.helper.RocketMQInstrumentationHelper;
+import co.elastic.apm.agent.rocketmq.instrumentation.BaseRocketMQInstrumentation;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;

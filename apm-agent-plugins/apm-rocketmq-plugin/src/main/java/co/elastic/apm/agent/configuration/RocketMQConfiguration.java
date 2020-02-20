@@ -24,37 +24,21 @@
  */
 package co.elastic.apm.agent.configuration;
 
-import co.elastic.apm.agent.bci.VisibleForAdvice;
 import org.stagemonitor.configuration.ConfigurationOption;
 import org.stagemonitor.configuration.ConfigurationOptionProvider;
 
-/**
- * Description:
- * Creator: Chenxujian
- * Date: 2020-02-19
- * Time: 10:17 AM
- * Email: chenxujian@cvte.com
- */
 public class RocketMQConfiguration extends ConfigurationOptionProvider {
 
-    private static final String MESSAGING_CATEGORY = "Messaging";
+    private static final String ROCKETMQ_CATEGORY = "RocketMQ";
 
-    private ConfigurationOption<ConsumerStrategy> consumerStrategy = ConfigurationOption.enumOption(ConsumerStrategy.class)
-        .key("rocketmq_consumer_strategy")
-        .configurationCategory(MESSAGING_CATEGORY)
+    private ConfigurationOption<Boolean> collectConsumeProcess = ConfigurationOption.booleanOption()
+        .key("rocketmq_collect_handing_process")
+        .configurationCategory(ROCKETMQ_CATEGORY)
         .dynamic(true)
-        .buildWithDefault(ConsumerStrategy.CONCURRENTLY_PUSH);
+        .buildWithDefault(false);
 
-
-    public ConsumerStrategy getConsumerStrategy() {
-        return consumerStrategy.get();
-    }
-
-    @VisibleForAdvice
-    public enum ConsumerStrategy {
-        ORDERLY_PUSH,
-        CONCURRENTLY_PUSH,
-        PULL
+    public Boolean shouldCollectConsumeProcess() {
+        return collectConsumeProcess.get();
     }
 
 }

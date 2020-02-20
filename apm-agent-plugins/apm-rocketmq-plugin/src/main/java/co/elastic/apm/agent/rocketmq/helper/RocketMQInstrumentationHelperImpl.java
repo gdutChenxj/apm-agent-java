@@ -25,7 +25,6 @@
 package co.elastic.apm.agent.rocketmq.helper;
 
 import co.elastic.apm.agent.configuration.MessagingConfiguration;
-import co.elastic.apm.agent.configuration.RocketMQConfiguration;
 import co.elastic.apm.agent.impl.ElasticApmTracer;
 import co.elastic.apm.agent.impl.transaction.Span;
 import co.elastic.apm.agent.impl.transaction.TraceContext;
@@ -112,7 +111,8 @@ public class RocketMQInstrumentationHelperImpl implements RocketMQInstrumentatio
     }
 
     @Override
-    public void onMessageListenerConsume(List<MessageExt> msgs, RocketMQConfiguration.ConsumerStrategy strategy) {
+    public Transaction onMessageListenerConsume(List<MessageExt> msgs) {
+        Transaction transaction = null;
         MessageExt firstMsgExt = msgs.get(0);
 
         try {
@@ -120,7 +120,6 @@ public class RocketMQInstrumentationHelperImpl implements RocketMQInstrumentatio
             if (!ignoreTopic(topic)) {
                 // use remove() to get the trace parent property to make it invisible for application.
                 String traceParentProperty = firstMsgExt.getProperties().remove(TraceContext.TRACE_PARENT_TEXTUAL_HEADER_NAME);
-                Transaction transaction;
                 if (StringUtils.isEmpty(traceParentProperty)) {
                     transaction = tracer.startTransaction(
                         TraceContext.fromTraceparentHeader(),
@@ -130,14 +129,15 @@ public class RocketMQInstrumentationHelperImpl implements RocketMQInstrumentatio
                 } else {
                     transaction = tracer.startRootTransaction(ConsumerMessageIteratorWrapper.class.getClassLoader());
                 }
-                transaction.withType("messaging").withName("RocketMQ#" + strategy + "#" + topic).activate();
+                transaction.withType("messaging").withName("RocketMQ#" + topic).activate();
                 co.elastic.apm.agent.impl.context.Message traceContextMsg = transaction.getContext().getMessage();
                 traceContextMsg.withQueue(topic);
                 traceContextMsg.withAge(System.currentTimeMillis() - firstMsgExt.getBornTimestamp());
             }
         } catch (Exception e) {
-            logger.error("Error in transaction creation based on RocketMQ message", e);
+            logger.error("Error in transaction creation", e);
         }
+        return transaction;
     }
 
     @Override

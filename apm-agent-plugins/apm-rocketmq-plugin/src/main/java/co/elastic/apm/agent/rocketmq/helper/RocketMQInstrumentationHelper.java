@@ -24,8 +24,8 @@
  */
 package co.elastic.apm.agent.rocketmq.helper;
 
-import co.elastic.apm.agent.configuration.RocketMQConfiguration;
 import co.elastic.apm.agent.impl.transaction.Span;
+import co.elastic.apm.agent.impl.transaction.Transaction;
 import org.apache.rocketmq.client.impl.CommunicationMode;
 import org.apache.rocketmq.client.producer.SendCallback;
 import org.apache.rocketmq.common.message.Message;
@@ -40,7 +40,7 @@ public interface RocketMQInstrumentationHelper {
 
     SendCallback wrapSendCallback(SendCallback delegate, Span span);
 
-    void onMessageListenerConsume(List<MessageExt> msgs, RocketMQConfiguration.ConsumerStrategy strategy);
+    Transaction onMessageListenerConsume(List<MessageExt> msgs);
 
     List<MessageExt> wrapMsgFoundList(List<MessageExt> delegate);
 

@@ -22,11 +22,12 @@
  * under the License.
  * #L%
  */
-package co.elastic.apm.agent.rocketmq;
+package co.elastic.apm.agent.rocketmq.instrumentation.consumer;
 
 import co.elastic.apm.agent.bci.VisibleForAdvice;
 import co.elastic.apm.agent.impl.ElasticApmTracer;
 import co.elastic.apm.agent.rocketmq.helper.RocketMQInstrumentationHelper;
+import co.elastic.apm.agent.rocketmq.instrumentation.BaseRocketMQInstrumentation;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
@@ -39,9 +40,9 @@ import java.util.List;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
 
-public class RocketMQConsumerInstrumentation extends BaseRocketMQInstrumentation {
+public class RocketMQConsumeProcessInstrumentation extends BaseRocketMQInstrumentation {
 
-    public RocketMQConsumerInstrumentation(ElasticApmTracer tracer) {
+    public RocketMQConsumeProcessInstrumentation(ElasticApmTracer tracer) {
         super(tracer);
     }
 
@@ -67,6 +68,10 @@ public class RocketMQConsumerInstrumentation extends BaseRocketMQInstrumentation
         @Advice.OnMethodExit(suppress = Throwable.class)
         public static void onAfterGetMsgFoundList(@Nullable @Advice.Return(readOnly = false) List<MessageExt> ret) {
             if (tracer == null || tracer.currentTransaction() != null) {
+                return;
+            }
+
+            if (!rocketMQConfig.shouldCollectConsumeProcess()) {
                 return;
             }
 
