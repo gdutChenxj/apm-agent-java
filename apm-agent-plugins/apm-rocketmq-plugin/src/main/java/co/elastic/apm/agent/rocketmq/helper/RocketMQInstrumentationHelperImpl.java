@@ -75,7 +75,7 @@ public class RocketMQInstrumentationHelperImpl implements RocketMQInstrumentatio
 
         span.withType("messaging")
             .withSubtype("rocketmq")
-            .withAction("send/" + communicationMode.name().toLowerCase())
+            .withAction("send")
             .withName("DefaultMQProducerImpl#sendKernelImpl");
         span.getContext().getMessage().withQueue(topic + "/" + mq.getBrokerName() + "/" + mq.getQueueId());
         span.getContext().getDestination().getService().withType("messaging").withName("rocketmq")
@@ -129,7 +129,7 @@ public class RocketMQInstrumentationHelperImpl implements RocketMQInstrumentatio
                 } else {
                     transaction = tracer.startRootTransaction(ConsumerMessageIteratorWrapper.class.getClassLoader());
                 }
-                transaction.withType("messaging").withName("RocketMQ#" + topic).activate();
+                transaction.withType("messaging").withName("RocketMQ Message Consume#" + topic).activate();
                 co.elastic.apm.agent.impl.context.Message traceContextMsg = transaction.getContext().getMessage();
                 traceContextMsg.withQueue(topic);
                 traceContextMsg.withAge(System.currentTimeMillis() - firstMsgExt.getBornTimestamp());

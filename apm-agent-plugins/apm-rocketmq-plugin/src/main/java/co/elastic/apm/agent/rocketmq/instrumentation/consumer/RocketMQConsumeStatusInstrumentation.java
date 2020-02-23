@@ -32,8 +32,8 @@ import net.bytebuddy.asm.Advice;
 import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
-import org.apache.rocketmq.client.consumer.MQConsumer;
 import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
+import org.apache.rocketmq.client.producer.MQProducer;
 import org.apache.rocketmq.common.message.MessageExt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,7 +55,7 @@ public class RocketMQConsumeStatusInstrumentation extends BaseRocketMQInstrument
     @Override
     public ElementMatcher<? super TypeDescription> getTypeMatcher() {
         return hasSuperType(named("org.apache.rocketmq.client.consumer.listener.MessageListenerOrderly")
-            .or(hasSuperType(named("org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently"))));
+            .or(named("org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently")));
     }
 
     @Override
@@ -82,7 +82,7 @@ public class RocketMQConsumeStatusInstrumentation extends BaseRocketMQInstrument
             }
 
             if (msgs != null && helperClassManager != null) {
-                final RocketMQInstrumentationHelper helper = helperClassManager.getForClassLoaderOfClass(MQConsumer.class);
+                final RocketMQInstrumentationHelper helper = helperClassManager.getForClassLoaderOfClass(MQProducer.class);
                 if (helper == null) {
                     return;
                 }
@@ -99,9 +99,7 @@ public class RocketMQConsumeStatusInstrumentation extends BaseRocketMQInstrument
             }
             try {
                 if (transaction != null && "messaging".equals(transaction.getType())) {
-                    if (status == ConsumeConcurrentlyStatus.RECONSUME_LATER) {
-                        transaction.addLabel("consume.status", status.name());
-                    }
+                    transaction.withResult(status.name());
                     transaction.deactivate().end();
                 }
             } catch (Exception e) {
