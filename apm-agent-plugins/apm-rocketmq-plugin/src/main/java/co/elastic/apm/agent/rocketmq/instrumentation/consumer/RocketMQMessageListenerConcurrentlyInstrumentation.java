@@ -11,9 +11,9 @@
  * the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * 
  *   http://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -24,7 +24,6 @@
  */
 package co.elastic.apm.agent.rocketmq.instrumentation.consumer;
 
-import co.elastic.apm.agent.bci.VisibleForAdvice;
 import co.elastic.apm.agent.impl.ElasticApmTracer;
 import co.elastic.apm.agent.rocketmq.helper.RocketMQInstrumentationHelper;
 import co.elastic.apm.agent.rocketmq.instrumentation.BaseRocketMQInstrumentation;
@@ -32,56 +31,51 @@ import net.bytebuddy.asm.Advice;
 import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
-import org.apache.rocketmq.client.producer.MQProducer;
-import org.apache.rocketmq.common.message.MessageExt;
-
-import javax.annotation.Nullable;
-import java.util.List;
+import org.apache.rocketmq.client.consumer.MQConsumer;
+import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
+import static net.bytebuddy.matcher.ElementMatchers.takesArgument;
 
-public class RocketMQConsumeProcessInstrumentation extends BaseRocketMQInstrumentation {
+public class RocketMQMessageListenerConcurrentlyInstrumentation extends BaseRocketMQInstrumentation {
 
-    public RocketMQConsumeProcessInstrumentation(ElasticApmTracer tracer) {
+    public RocketMQMessageListenerConcurrentlyInstrumentation(ElasticApmTracer tracer) {
         super(tracer);
     }
 
     @Override
     public ElementMatcher<? super TypeDescription> getTypeMatcher() {
-        return named("org.apache.rocketmq.client.consumer.PullResult");
+        return named("org.apache.rocketmq.client.consumer.DefaultMQPushConsumer");
     }
 
     @Override
     public ElementMatcher<? super MethodDescription> getMethodMatcher() {
-        return named("getMsgFoundList");
+        return named("registerMessageListener")
+            .and(takesArgument(0, named("org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently")));
     }
 
     @Override
     public Class<?> getAdviceClass() {
-        return RocketMQConsumerAdvice.class;
+        return MessageListenerConcurrentlyAdvice.class;
     }
 
-    @SuppressWarnings("rawtypes")
-    @VisibleForAdvice
-    public static class RocketMQConsumerAdvice {
+    public static class MessageListenerConcurrentlyAdvice {
 
-        @Advice.OnMethodExit(suppress = Throwable.class)
-        public static void onAfterGetMsgFoundList(@Nullable @Advice.Return(readOnly = false) List<MessageExt> ret) {
+        @Advice.OnMethodEnter(suppress = Throwable.class)
+        private static void onEnter(@Advice.Argument(value = 0, readOnly = false) MessageListenerConcurrently messageListener) {
             if (tracer == null || tracer.currentTransaction() != null) {
                 return;
             }
 
-            if (!rocketMQConfig.shouldCollectConsumeProcess()) {
+            if (helperClassManager == null) {
+                return;
+            }
+            final RocketMQInstrumentationHelper helper = helperClassManager.getForClassLoaderOfClass(MQConsumer.class);
+            if (helper == null) {
                 return;
             }
 
-            if (ret != null && helperClassManager != null) {
-                final RocketMQInstrumentationHelper helper = helperClassManager.getForClassLoaderOfClass(MQProducer.class);
-                if (helper == null) {
-                    return;
-                }
-                ret = helper.wrapMsgFoundList(ret);
-            }
+            messageListener = helper.wrapMessageListener(messageListener);
         }
 
     }

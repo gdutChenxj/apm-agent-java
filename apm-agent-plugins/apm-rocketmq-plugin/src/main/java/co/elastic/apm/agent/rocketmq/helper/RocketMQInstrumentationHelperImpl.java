@@ -27,11 +27,12 @@ package co.elastic.apm.agent.rocketmq.helper;
 import co.elastic.apm.agent.configuration.MessagingConfiguration;
 import co.elastic.apm.agent.impl.ElasticApmTracer;
 import co.elastic.apm.agent.impl.transaction.Span;
-import co.elastic.apm.agent.impl.transaction.TraceContext;
 import co.elastic.apm.agent.impl.transaction.TraceContextHolder;
 import co.elastic.apm.agent.impl.transaction.Transaction;
 import co.elastic.apm.agent.matcher.WildcardMatcher;
-import org.apache.commons.lang3.StringUtils;
+import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
+import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
+import org.apache.rocketmq.client.consumer.listener.MessageListenerOrderly;
 import org.apache.rocketmq.client.impl.CommunicationMode;
 import org.apache.rocketmq.client.producer.SendCallback;
 import org.apache.rocketmq.common.message.Message;
@@ -76,19 +77,10 @@ public class RocketMQInstrumentationHelperImpl implements RocketMQInstrumentatio
         span.withType("messaging")
             .withSubtype("rocketmq")
             .withAction("send")
-            .withName("DefaultMQProducerImpl#sendKernelImpl");
+            .withName("RocketMQ#SendMsg#" + topic);
         span.getContext().getMessage().withQueue(topic + "/" + mq.getBrokerName() + "/" + mq.getQueueId());
         span.getContext().getDestination().getService().withType("messaging").withName("rocketmq")
             .getResource().append("rocketmq/").append(topic);
-
-        try {
-            msg.putUserProperty(TraceContext.TRACE_PARENT_TEXTUAL_HEADER_NAME,
-                span.getTraceContext().getOutgoingTraceParentTextHeader().toString());
-        } catch (Exception exp) {
-            if (logger.isDebugEnabled()) {
-                logger.debug("Failed to add user property to rocketmq message {} because {}", msg, exp.getMessage());
-            }
-        }
 
         span.activate();
 
@@ -110,45 +102,60 @@ public class RocketMQInstrumentationHelperImpl implements RocketMQInstrumentatio
         return new SendCallbackWrapper(delegate, span);
     }
 
-    @Override
-    public Transaction onMessageListenerConsume(List<MessageExt> msgs) {
-        Transaction transaction = null;
-        MessageExt firstMsgExt = msgs.get(0);
 
+    @Override
+    public MessageListenerConcurrently wrapMessageListener(MessageListenerConcurrently listenerConcurrently) {
+        if (listenerConcurrently == null) {
+            return null;
+        }
+        if (listenerConcurrently instanceof MessageListenerConcurrentlyWrapper) {
+            return listenerConcurrently;
+        }
+        return new MessageListenerConcurrentlyWrapper(listenerConcurrently, this::startConsumeTrans, this::endConsumeTrans);
+    }
+
+    @Override
+    public MessageListenerOrderly wrapMessageListener(MessageListenerOrderly listenerOrderly) {
+        if (listenerOrderly == null) {
+            return null;
+        }
+        if (listenerOrderly instanceof MessageListenerOrderlyWrapper) {
+            return listenerOrderly;
+        }
+        return new MessageListenerOrderlyWrapper(listenerOrderly, this::startConsumeTrans, this::endConsumeTrans);
+    }
+
+    private Transaction startConsumeTrans(List<MessageExt> msgs) {
+        Transaction transaction = null;
         try {
+            MessageExt firstMsgExt = msgs.get(0);
             String topic = firstMsgExt.getTopic();
             if (!ignoreTopic(topic)) {
-                // use remove() to get the trace parent property to make it invisible for application.
-                String traceParentProperty = firstMsgExt.getProperties().remove(TraceContext.TRACE_PARENT_TEXTUAL_HEADER_NAME);
-                if (StringUtils.isEmpty(traceParentProperty)) {
-                    transaction = tracer.startTransaction(
-                        TraceContext.fromTraceparentHeader(),
-                        traceParentProperty,
-                        ConsumerMessageIteratorWrapper.class.getClassLoader()
-                    );
-                } else {
-                    transaction = tracer.startRootTransaction(ConsumerMessageIteratorWrapper.class.getClassLoader());
-                }
-                transaction.withType("messaging").withName("RocketMQ Message Consume#" + topic).activate();
-                co.elastic.apm.agent.impl.context.Message traceContextMsg = transaction.getContext().getMessage();
-                traceContextMsg.withQueue(topic);
-                traceContextMsg.withAge(System.currentTimeMillis() - firstMsgExt.getBornTimestamp());
+                transaction = tracer.startRootTransaction(null)
+                    .withType("messaging")
+                    .withName("RocketMQ#ConsumeMsg#" + topic)
+                    .activate();
+                transaction.getContext().getMessage()
+                    .withQueue(topic)
+                    .withAge(System.currentTimeMillis() - firstMsgExt.getBornTimestamp());
             }
         } catch (Exception e) {
-            logger.error("Error in transaction creation", e);
+            logger.error("Error in RocketMQ consume transaction creation", e);
         }
         return transaction;
     }
 
-    @Override
-    public List<MessageExt> wrapMsgFoundList(List<MessageExt> delegate) {
-        if (delegate == null) {
-            return null;
+    private void endConsumeTrans(Transaction transaction, Object status) {
+        try {
+            if (transaction != null && "messaging".equals(transaction.getType())) {
+                if (status instanceof ConsumeConcurrentlyStatus) {
+                    transaction.withResult(((ConsumeConcurrentlyStatus)status).name());
+                }
+                transaction.deactivate().end();
+            }
+        } catch (Exception e) {
+            logger.error("Error in RocketMQ consume transaction creation.", e);
         }
-        if (delegate instanceof ConsumerMessageListWrapper) {
-            return delegate;
-        }
-        return new ConsumerMessageListWrapper(delegate, tracer);
     }
 
 }

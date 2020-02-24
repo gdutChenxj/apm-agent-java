@@ -26,7 +26,6 @@ package co.elastic.apm.agent.rocketmq.instrumentation;
 
 import co.elastic.apm.agent.bci.ElasticApmInstrumentation;
 import co.elastic.apm.agent.bci.HelperClassManager;
-import co.elastic.apm.agent.configuration.RocketMQConfiguration;
 import co.elastic.apm.agent.impl.ElasticApmTracer;
 import co.elastic.apm.agent.rocketmq.helper.RocketMQInstrumentationHelper;
 
@@ -37,8 +36,6 @@ public abstract class BaseRocketMQInstrumentation extends ElasticApmInstrumentat
 
     public static HelperClassManager<RocketMQInstrumentationHelper> helperClassManager;
 
-    public static RocketMQConfiguration rocketMQConfig;
-
     public BaseRocketMQInstrumentation(ElasticApmTracer tracer) {
         BaseRocketMQInstrumentation.init(tracer);
     }
@@ -48,12 +45,9 @@ public abstract class BaseRocketMQInstrumentation extends ElasticApmInstrumentat
             helperClassManager = HelperClassManager.ForAnyClassLoader.of(tracer,
                 "co.elastic.apm.agent.rocketmq.helper.RocketMQInstrumentationHelperImpl",
                 "co.elastic.apm.agent.rocketmq.helper.SendCallbackWrapper",
-                "co.elastic.apm.agent.rocketmq.helper.ConsumerMessageListWrapper",
-                "co.elastic.apm.agent.rocketmq.helper.ConsumerMessageIteratorWrapper");
-        }
-
-        if (rocketMQConfig == null) {
-            rocketMQConfig = tracer.getConfig(RocketMQConfiguration.class);
+                "co.elastic.apm.agent.rocketmq.helper.MessageListenerWrapper",
+                "co.elastic.apm.agent.rocketmq.helper.MessageListenerOrderlyWrapper",
+                "co.elastic.apm.agent.rocketmq.helper.MessageListenerConcurrentlyWrapper");
         }
     }
 

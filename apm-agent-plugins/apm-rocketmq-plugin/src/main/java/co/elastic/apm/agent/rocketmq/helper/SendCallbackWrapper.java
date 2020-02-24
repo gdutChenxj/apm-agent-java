@@ -28,21 +28,16 @@ import co.elastic.apm.agent.impl.transaction.Span;
 import org.apache.rocketmq.client.producer.SendCallback;
 import org.apache.rocketmq.client.producer.SendResult;
 
-import javax.annotation.Nullable;
+import javax.annotation.Nonnull;
 
-/**
- * @author CHJ
- * @version 1.0
- * @date 2020/2/16 19:34
- */
 public class SendCallbackWrapper implements SendCallback {
 
-    @Nullable
+    @Nonnull
     private SendCallback delegate;
 
     private volatile Span span;
 
-    public SendCallbackWrapper(@Nullable SendCallback delegate, Span span) {
+    public SendCallbackWrapper(@Nonnull SendCallback delegate, Span span) {
         this.delegate = delegate;
         this.span = span;
     }
@@ -51,9 +46,7 @@ public class SendCallbackWrapper implements SendCallback {
     public void onSuccess(SendResult sendResult) {
         try {
             span.activate();
-            if (delegate != null) {
-                delegate.onSuccess(sendResult);
-            }
+            delegate.onSuccess(sendResult);
         } finally {
             span.deactivate().end();
         }
@@ -63,9 +56,7 @@ public class SendCallbackWrapper implements SendCallback {
     public void onException(Throwable throwable) {
         try {
             span.activate();
-            if (delegate != null) {
-                delegate.onException(throwable);
-            }
+            delegate.onException(throwable);
         } finally {
             span.captureException(throwable);
             span.deactivate().end();
