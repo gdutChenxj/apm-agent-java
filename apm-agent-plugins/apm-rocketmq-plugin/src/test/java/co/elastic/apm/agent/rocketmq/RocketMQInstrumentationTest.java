@@ -31,7 +31,6 @@ import co.elastic.apm.agent.impl.transaction.Span;
 import co.elastic.apm.agent.impl.transaction.TraceContext;
 import co.elastic.apm.agent.impl.transaction.Transaction;
 import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
-import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyContext;
 import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
 import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
 import org.apache.rocketmq.client.exception.MQClientException;
@@ -50,11 +49,14 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
-@Ignore
 @SuppressWarnings("NotNullFieldNotInitialized")
 public class RocketMQInstrumentationTest extends AbstractInstrumentationTest {
 
-    private static final String NAME_SRV = "172.18.70.49:9876";
+    private static final String NAME_SRV_HOST = "my-rocketmq";
+
+    private static final String NAME_SRV_PORT = "9876";
+
+    private static final String NAME_SRV = NAME_SRV_HOST + ":" + NAME_SRV_PORT;
 
     private static final String PRODUCER_GROUP =  UUID.randomUUID().toString();
 
@@ -67,6 +69,10 @@ public class RocketMQInstrumentationTest extends AbstractInstrumentationTest {
     private static final byte[] SECOND_MESSAGE_BODY = "Second message body".getBytes(StandardCharsets.UTF_8);
 
     private static final byte[] THIRD_MESSAGE_BODY = "Third message body".getBytes(StandardCharsets.UTF_8);
+
+    private static final String RE_CONSUME_TAG = "consume_later";
+
+    private static final String CONSUME_WITH_EXP_TAG = "exception";
 
     private static DefaultMQProducer producer;
 
@@ -93,7 +99,19 @@ public class RocketMQInstrumentationTest extends AbstractInstrumentationTest {
     private static void initConsumer() throws MQClientException {
         consumer = new DefaultMQPushConsumer(CONSUMER_GROUP);
         consumer.setNamesrvAddr(NAME_SRV);
-        consumer.registerMessageListener(new MessageConsumer());
+        consumer.registerMessageListener((MessageListenerConcurrently) (msgs, context) -> {
+            MessageExt msg = msgs.get(0);
+            String tag = msg.getTags();
+            if (RE_CONSUME_TAG.equals(tag)) {
+                msg.setTags(null);
+                return ConsumeConcurrentlyStatus.RECONSUME_LATER;
+            } else if (CONSUME_WITH_EXP_TAG.equals(tag)) {
+                msg.setTags(null);
+                throw new RuntimeException("consume exception");
+            } else {
+                return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
+            }
+        });
         consumer.subscribe(TOPIC, "*");
         consumer.start();
     }
@@ -116,28 +134,26 @@ public class RocketMQInstrumentationTest extends AbstractInstrumentationTest {
 
     @Test
     public void testSendAndConsumeMessage() {
-        sendTwoMessage();
+        sendMessage();
         verifyTracing();
     }
 
-    private void sendTwoMessage() {
-        StringBuilder callbackExecutedFlag = new StringBuilder();
-
+    private void sendMessage() {
         Message firstMessage = new Message(TOPIC, FIRST_MESSAGE_BODY);
         Message secondMessage = new Message(TOPIC, SECOND_MESSAGE_BODY);
+        secondMessage.setTags(RE_CONSUME_TAG);
         Message thirdMessage = new Message(TOPIC, THIRD_MESSAGE_BODY);
+        thirdMessage.setTags(CONSUME_WITH_EXP_TAG);
         try {
             producer.send(firstMessage);
             producer.sendOneway(secondMessage);
             producer.send(thirdMessage, new SendCallback() {
                 @Override
                 public void onSuccess(SendResult sendResult) {
-                    callbackExecutedFlag.append("success");
                 }
 
                 @Override
                 public void onException(Throwable e) {
-                    callbackExecutedFlag.append("failure");
                 }
             });
 
@@ -145,34 +161,25 @@ public class RocketMQInstrumentationTest extends AbstractInstrumentationTest {
             e.printStackTrace();
         }
 
-        await().atMost(5000, TimeUnit.MILLISECONDS).until(() -> !callbackExecutedFlag.toString().isEmpty());
+        await().atMost(5000, TimeUnit.MILLISECONDS).until(() -> reporter.getTransactions().size() >= 3);
     }
 
     private void verifyTracing() {
-        reporter.getTransactions().stream()
-            .filter(this::isMessagingTransaction)
-            .forEach(this::verifyConsumeTransactionContents);
+        verifySendSpan();
+        verifyConsumeTransaction();
+    }
 
+    private void verifySendSpan() {
         List<Span> spans = reporter.getSpans();
         assertThat(spans).hasSize(3);
         spans.forEach(this::verifySendSpanContents);
-    }
-
-    private boolean isMessagingTransaction(Transaction transaction) {
-        return "messaging".equals(transaction.getType());
-    }
-
-    private void verifyConsumeTransactionContents(Transaction transaction) {
-        assertThat(transaction.getType()).isEqualTo("messaging");
-        assertThat(transaction.getNameAsString()).startsWith("RocketMQ Message Consume");
-        assertThat(transaction.getResult()).isNotEmpty();
     }
 
     private void verifySendSpanContents(Span span) {
         assertThat(span.getType()).isEqualTo("messaging");
         assertThat(span.getSubtype()).isEqualTo("rocketmq");
         assertThat(span.getAction()).isEqualTo("send");
-        assertThat(span.getNameAsString()).isEqualTo("DefaultMQProducerImpl#sendKernelImpl");
+        assertThat(span.getNameAsString()).isEqualTo("RocketMQ Send Message#" + TOPIC);
 
         SpanContext context = span.getContext();
 
@@ -184,11 +191,22 @@ public class RocketMQInstrumentationTest extends AbstractInstrumentationTest {
         assertThat(service.getResource().toString()).isEqualTo("rocketmq/" + TOPIC);
     }
 
-    static class MessageConsumer implements MessageListenerConcurrently {
+    private void verifyConsumeTransaction() {
+        reporter.getTransactions().stream()
+            .filter(this::isMessagingTransaction)
+            .forEach(this::verifyConsumeTransactionContents);
+    }
 
-        @Override
-        public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs, ConsumeConcurrentlyContext context) {
-            return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
+    private boolean isMessagingTransaction(Transaction transaction) {
+        return "messaging".equals(transaction.getType());
+    }
+
+    private void verifyConsumeTransactionContents(Transaction transaction) {
+        assertThat(transaction.getType()).isEqualTo("messaging");
+        assertThat(transaction.getNameAsString()).isEqualTo("RocketMQ Consume Message#" + TOPIC);
+        if (transaction.getResult() != null) {
+            assertThat(transaction.getResult()).isIn(ConsumeConcurrentlyStatus.CONSUME_SUCCESS.name(),
+                ConsumeConcurrentlyStatus.RECONSUME_LATER.name());
         }
     }
 

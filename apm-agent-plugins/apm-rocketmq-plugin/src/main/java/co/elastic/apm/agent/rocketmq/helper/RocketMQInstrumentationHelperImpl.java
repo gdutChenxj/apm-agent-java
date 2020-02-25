@@ -77,7 +77,7 @@ public class RocketMQInstrumentationHelperImpl implements RocketMQInstrumentatio
         span.withType("messaging")
             .withSubtype("rocketmq")
             .withAction("send")
-            .withName("RocketMQ#SendMsg#" + topic);
+            .withName("RocketMQ Send Message#" + topic);
         span.getContext().getMessage().withQueue(topic + "/" + mq.getBrokerName() + "/" + mq.getQueueId());
         span.getContext().getDestination().getService().withType("messaging").withName("rocketmq")
             .getResource().append("rocketmq/").append(topic);
@@ -133,7 +133,7 @@ public class RocketMQInstrumentationHelperImpl implements RocketMQInstrumentatio
             if (!ignoreTopic(topic)) {
                 transaction = tracer.startRootTransaction(null)
                     .withType("messaging")
-                    .withName("RocketMQ#ConsumeMsg#" + topic)
+                    .withName("RocketMQ Consume Message#" + topic)
                     .activate();
                 transaction.getContext().getMessage()
                     .withQueue(topic)
