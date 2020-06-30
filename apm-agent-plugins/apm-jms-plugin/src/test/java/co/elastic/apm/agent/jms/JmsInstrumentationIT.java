@@ -78,7 +78,7 @@ import static co.elastic.apm.agent.jms.JmsInstrumentationHelperImpl.TIBCO_TMP_QU
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doReturn;
 
 @RunWith(Parameterized.class)
 public class JmsInstrumentationIT extends AbstractInstrumentationTest {
@@ -124,7 +124,7 @@ public class JmsInstrumentationIT extends AbstractInstrumentationTest {
         startAndActivateTransaction(null);
         brokerFacade.beforeTest();
         noopQ = brokerFacade.createQueue("NOOP");
-        when(coreConfiguration.getCaptureBody()).thenReturn(CoreConfiguration.EventType.ALL);
+        doReturn(CoreConfiguration.EventType.ALL).when(coreConfiguration).getCaptureBody();
     }
 
     private void startAndActivateTransaction(@Nullable Sampler sampler) {
@@ -283,14 +283,14 @@ public class JmsInstrumentationIT extends AbstractInstrumentationTest {
 
     @Test
     public void testPollingTransactionCreationOnly() throws Exception {
-        when(config.getConfig(MessagingConfiguration.class).getMessagePollingTransactionStrategy()).thenReturn(POLLING);
+        doReturn(POLLING).when(config.getConfig(MessagingConfiguration.class)).getMessagePollingTransactionStrategy();
         final Queue queue = createTestQueue();
         doTestSendReceiveOnNonTracedThread(() -> brokerFacade.receive(queue, 10), queue, false);
     }
 
     @Test
     public void testHandlingAndPollingTransactionCreation() throws Exception {
-        when(config.getConfig(MessagingConfiguration.class).getMessagePollingTransactionStrategy()).thenReturn(BOTH);
+        doReturn(BOTH).when(config.getConfig(MessagingConfiguration.class)).getMessagePollingTransactionStrategy();
         final Queue queue = createTestQueue();
         doTestSendReceiveOnNonTracedThread(() -> brokerFacade.receive(queue, 10), queue, false);
     }
@@ -304,9 +304,8 @@ public class JmsInstrumentationIT extends AbstractInstrumentationTest {
 
     @Test
     public void testQueueDisablement() throws Exception {
-        when(config.getConfig(MessagingConfiguration.class).getMessagePollingTransactionStrategy()).thenReturn(BOTH);
-        when(config.getConfig(MessagingConfiguration.class).getIgnoreMessageQueues())
-            .thenReturn(List.of(WildcardMatcher.valueOf("ignore-*")));
+        doReturn(BOTH).when(config.getConfig(MessagingConfiguration.class)).getMessagePollingTransactionStrategy();
+        doReturn(List.of(WildcardMatcher.valueOf("ignore-*"))).when(config.getConfig(MessagingConfiguration.class)).getIgnoreMessageQueues();
         final Queue queue = brokerFacade.createQueue("ignore-this");
         expectNoTraces.set(true);
         doTestSendReceiveOnNonTracedThread(() -> brokerFacade.receive(queue, 10), queue, false);
@@ -474,6 +473,7 @@ public class JmsInstrumentationIT extends AbstractInstrumentationTest {
         for (Transaction receiveTransaction : receiveTransactions) {
             assertThat(receiveTransaction.getNameAsString()).startsWith("JMS RECEIVE from ");
             assertThat(receiveTransaction.getNameAsString()).endsWith(destinationName);
+            assertThat(receiveTransaction.getFrameworkName()).isEqualTo("JMS");
             assertThat(receiveTransaction.getTraceContext().getTraceId()).isEqualTo(currentTraceId);
             assertThat(receiveTransaction.getTraceContext().getParentId()).isEqualTo(sendSpan.getTraceContext().getId());
             assertThat(receiveTransaction.getType()).isEqualTo(MESSAGING_TYPE);
