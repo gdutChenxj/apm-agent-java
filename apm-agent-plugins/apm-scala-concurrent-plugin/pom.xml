@@ -25,7 +25,7 @@
         <dependency>
             <groupId>org.scalameta</groupId>
             <artifactId>munit_2.13</artifactId>
-            <version>0.7.2</version>
+            <version>0.7.9</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -49,6 +49,14 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <includes>
+                        <include>**/*Spec.*</include>
+                    </includes>
+                </configuration>
             </plugin>
         </plugins>
     </build>

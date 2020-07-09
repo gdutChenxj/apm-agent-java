@@ -240,6 +240,11 @@ public class MockReporter implements Reporter {
         assertNoSpan();
     }
 
+    public void awaitTransactionCount(int count) {
+        awaitTimeout(1000)
+            .untilAsserted(() -> assertThat(getTransactions()).hasSize(count));
+    }
+
     public void awaitSpanCount(int count) {
         awaitTimeout(1000)
             .untilAsserted(() -> assertThat(getSpans()).hasSize(count));
