@@ -79,7 +79,7 @@ public class RocketMQPullCallbackInstrumentation extends BaseRocketMQInstrumenta
 
         @Advice.OnMethodEnter(suppress = Throwable.class)
         private static void onEnter(@Nullable @Advice.Argument(value = 4, readOnly = false) PullCallback pullCallback) {
-            if (tracer == null || !tracer.isRunning() || helperClassManager == null) {
+            if (!tracer.isRunning() || helperClassManager == null) {
                 return;
             }
 
