@@ -28,7 +28,10 @@ import javax.annotation.Nullable;
 import java.io.File;
 import java.lang.instrument.Instrumentation;
 import java.net.URISyntaxException;
+import java.net.URL;
 import java.nio.file.FileSystems;
+import java.security.CodeSource;
+import java.security.ProtectionDomain;
 import java.util.jar.JarFile;
 
 /**
@@ -124,7 +127,12 @@ public class AgentMain {
         if (version.startsWith("1.")) {
             major = Character.digit(version.charAt(2), 10);
         } else {
-            major = Integer.parseInt(version.split("\\.")[0]);
+            String majorAsString = version.split("\\.")[0];
+            int indexOfDash = majorAsString.indexOf('-');
+            if (indexOfDash > 0) {
+                majorAsString = majorAsString.substring(0, indexOfDash);
+            }
+            major = Integer.parseInt(majorAsString);
         }
 
         boolean isHotSpot = vmName.contains("HotSpot(TM)") || vmName.contains("OpenJDK");
@@ -191,7 +199,16 @@ public class AgentMain {
     }
 
     private static File getAgentJarFile() throws URISyntaxException {
-        final File agentJar = new File(AgentMain.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+        ProtectionDomain protectionDomain = AgentMain.class.getProtectionDomain();
+        CodeSource codeSource = protectionDomain.getCodeSource();
+        if (codeSource == null) {
+            throw new IllegalStateException(String.format("Unable to get agent location, protection domain = %s", protectionDomain));
+        }
+        URL location = codeSource.getLocation();
+        if (location == null) {
+            throw new IllegalStateException(String.format("Unable to get agent location, code source = %s", codeSource));
+        }
+        final File agentJar = new File(location.toURI());
         if (!agentJar.getName().endsWith(".jar")) {
             throw new IllegalStateException("Agent is not a jar file: " + agentJar);
         }
