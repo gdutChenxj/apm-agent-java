@@ -24,14 +24,11 @@
  */
 package co.elastic.apm.agent.rocketmq.helper;
 
-import co.elastic.apm.agent.bci.ElasticApmInstrumentation;
-import co.elastic.apm.agent.impl.ElasticApmTracer;
 import co.elastic.apm.agent.impl.transaction.Transaction;
 import org.apache.rocketmq.common.message.MessageExt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
 import java.util.Iterator;
 
 class ConsumeMessageIteratorWrapper implements Iterator<MessageExt> {

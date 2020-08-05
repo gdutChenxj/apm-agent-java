@@ -25,4 +25,4 @@
 @NonnullApi
 package co.elastic.apm.agent.rocketmq.helper;
 
-import co.elastic.apm.agent.annotation.NonnullApi;
+import co.elastic.apm.agent.sdk.NonnullApi;

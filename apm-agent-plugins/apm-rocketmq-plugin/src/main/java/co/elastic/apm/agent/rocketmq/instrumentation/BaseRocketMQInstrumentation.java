@@ -24,7 +24,6 @@
  */
 package co.elastic.apm.agent.rocketmq.instrumentation;
 
-import co.elastic.apm.agent.bci.ElasticApmInstrumentation;
 import co.elastic.apm.agent.bci.HelperClassManager;
 import co.elastic.apm.agent.bci.TracerAwareInstrumentation;
 import co.elastic.apm.agent.bci.VisibleForAdvice;

@@ -24,8 +24,6 @@
  */
 package co.elastic.apm.agent.rocketmq.helper;
 
-import co.elastic.apm.agent.bci.ElasticApmInstrumentation;
-import co.elastic.apm.agent.impl.ElasticApmTracer;
 import org.apache.rocketmq.client.consumer.PullCallback;
 import org.apache.rocketmq.client.consumer.PullResult;
 
