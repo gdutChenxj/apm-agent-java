@@ -84,7 +84,7 @@ public class RocketMQProducerInstrumentation extends BaseRocketMQInstrumentation
                                                    @Advice.Argument(1) MessageQueue mq,
                                                    @Advice.Argument(2) CommunicationMode communicationMode,
                                                    @Nullable @Advice.Argument(value = 3, readOnly = false) SendCallback sendCallback) {
-            if (tracer == null || !tracer.isRunning() || tracer.getActive() == null) {
+            if (!tracer.isRunning() || tracer.getActive() == null) {
                 return;
             }
 

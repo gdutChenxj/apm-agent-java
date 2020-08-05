@@ -61,6 +61,15 @@ public class CoreConfiguration extends ConfigurationOptionProvider {
     private static final String DEFAULT_CONFIG_FILE = AGENT_HOME_PLACEHOLDER + "/elasticapm.properties";
     public static final String CONFIG_FILE = "config_file";
 
+    private final ConfigurationOption<Boolean> enabled = ConfigurationOption.booleanOption()
+        .key("enabled")
+        .configurationCategory(CORE_CATEGORY)
+        .description("Setting to false will completely disable the agent, including instrumentation and remote config polling.\n" +
+            "If you want to dynamically change the status of the agent, use <<config-recording,`recording`>> instead.")
+        .dynamic(false)
+        .tags("added[1.18.0]")
+        .buildWithDefault(true);
+
     private final ConfigurationOption<Boolean> instrument = ConfigurationOption.booleanOption()
         .key(INSTRUMENT)
         .configurationCategory(CORE_CATEGORY)
@@ -117,6 +126,14 @@ public class CoreConfiguration extends ConfigurationOptionProvider {
             "NOTE: Metrics views can utilize this configuration since APM Server 7.5")
         .tags("added[1.11.0]")
         .build();
+
+    private final ConfigurationOption<TimeDuration> delayInit = TimeDurationValueConverter.durationOption("ms")
+        .key("delay_initialization")
+        .aliasKeys("delay_initialization_ms")
+        .configurationCategory(CORE_CATEGORY)
+        .tags("internal")
+        .description("If set to a value greater than 0ms, the agent will delay it's initialization.")
+        .buildWithDefault(TimeDuration.of("0ms"));
 
     private final ConfigurationOption<String> serviceVersion = ConfigurationOption.stringOption()
         .key("service_version")
@@ -334,11 +351,22 @@ public class CoreConfiguration extends ConfigurationOptionProvider {
         .builder(new ListValueConverter<>(new WildcardMatcherValueConverter()), List.class)
         .key("classes_excluded_from_instrumentation")
         .configurationCategory(CORE_CATEGORY)
+        .description("Use to exclude specific classes from being instrumented. In order to exclude entire packages, \n" +
+            "use wildcards, as in: `com.project.exclude.*`" +
+            "\n" +
+            WildcardMatcher.DOCUMENTATION)
+        .dynamic(false)
+        .buildWithDefault(Collections.<WildcardMatcher>emptyList());
+
+    private final ConfigurationOption<List<WildcardMatcher>> defaultClassesExcludedFromInstrumentation = ConfigurationOption
+        .builder(new ListValueConverter<>(new WildcardMatcherValueConverter()), List.class)
+        .key("classes_excluded_from_instrumentation_default")
+        .configurationCategory(CORE_CATEGORY)
         .tags("internal")
         .description("\n" +
             "\n" +
             WildcardMatcher.DOCUMENTATION)
-        .dynamic(true)
+        .dynamic(false)
         .buildWithDefault(Arrays.asList(
             WildcardMatcher.valueOf("(?-i)org.infinispan*"),
             WildcardMatcher.valueOf("(?-i)org.apache.xerces*"),
@@ -454,34 +482,6 @@ public class CoreConfiguration extends ConfigurationOptionProvider {
             "the higher of both thresholds will determine which spans will be discarded.")
         .buildWithDefault(TimeDuration.of("0ms"));
 
-    private final ConfigurationOption<String> appendPackagesToBootDelegationProperty = ConfigurationOption.stringOption()
-        .key("boot_delegation_packages")
-        .tags("added[1.7.0]")
-        .configurationCategory(CORE_CATEGORY)
-        .description("A comma-separated list of packages to be appended to the boot delegation system property. \n" +
-            "If set with an empty string, nothing will be appended to the boot delegation system property.\n" +
-            "Values to set in known environments:\n\n" +
-            "Nexus:\n\n" +
-            "----\n" +
-            "boot_delegation_packages=com.sun.*, javax.transaction, javax.transaction.*, javax.xml.crypto, javax.xml.crypto.*, sun.*," +
-            "co.elastic.apm.agent.*\n" +
-            "----\n\n" +
-            "Pentaho and RedHat JBoss Fuse:\n\n" +
-            "----\n" +
-            "boot_delegation_packages=org.apache.karaf.jaas.boot, org.apache.karaf.jaas.boot.principal, org.apache.karaf.management.boot, " +
-            "sun.*, com.sun.*, javax.transaction, javax.transaction.*, javax.xml.crypto, javax.xml.crypto.*, org.apache.xerces.jaxp.datatype, " +
-            "org.apache.xerces.stax, org.apache.xerces.parsers, org.apache.xerces.jaxp, org.apache.xerces.jaxp.validation, " +
-            "org.apache.xerces.dom, co.elastic.apm.agent.*\n" +
-            "----\n")
-        .buildWithDefault("co.elastic.apm.agent.*");
-
-    private final ConfigurationOption<Boolean> atlassianNewBootDelegation = ConfigurationOption.booleanOption()
-        .key("use_atlassian_new_boot_delegation")
-        .configurationCategory(CORE_CATEGORY)
-        .tags("internal")
-        .description("In new Atlassian OSGi there is a config to append to boot delegation packages instead of overriding the default.")
-        .buildWithDefault(false);
-
     private final ConfigurationOption<Boolean> centralConfig = ConfigurationOption.booleanOption()
         .key("central_config")
         .tags("added[1.8.0]")
@@ -508,6 +508,19 @@ public class CoreConfiguration extends ConfigurationOptionProvider {
             "\n" +
             "NOTE: this option can only be set via system properties, environment variables or the attacher options.")
         .buildWithDefault(DEFAULT_CONFIG_FILE);
+
+    private final ConfigurationOption<String> pluginsDirLocation = ConfigurationOption.stringOption()
+        .key("plugins_dir")
+        .tags("added[1.18.0]")
+        .configurationCategory(CORE_CATEGORY)
+        .tags("internal", "experimental")
+        .description("A folder that contains external agent plugins.\n" +
+            "\n" +
+            "Use the `apm-agent-plugin-sdk` and the `apm-agent-api` artifacts to create a jar and place it into the plugins folder.\n" +
+            "The agent will load all instrumentations that are declared in the\n" +
+            "`META-INF/services/co.elastic.apm.agent.sdk.ElasticApmInstrumentation` service descriptor.\n" +
+            "See `integration-tests/external-plugin-test` for an example plugin.")
+        .build();
 
     private final ConfigurationOption<Boolean> useElasticTraceparentHeader = ConfigurationOption.booleanOption()
         .key("use_elastic_traceparent_header")
@@ -553,6 +566,10 @@ public class CoreConfiguration extends ConfigurationOptionProvider {
         .dynamic(true)
         .buildWithDefault(TimeDuration.of("0ms"));
 
+    public boolean isEnabled() {
+        return enabled.get();
+    }
+
     public boolean isInstrument() {
         return instrument.get();
     }
@@ -576,6 +593,10 @@ public class CoreConfiguration extends ConfigurationOptionProvider {
             return null;
         }
         return nodeName;
+    }
+
+    public long getDelayInitMs() {
+        return delayInit.get().getMillis();
     }
 
     public String getServiceVersion() {
@@ -638,6 +659,10 @@ public class CoreConfiguration extends ConfigurationOptionProvider {
         return classesExcludedFromInstrumentation.get();
     }
 
+    public List<WildcardMatcher> getDefaultClassesExcludedFromInstrumentation() {
+        return defaultClassesExcludedFromInstrumentation.get();
+    }
+
     public List<WildcardMatcher> getMethodsExcludedFromInstrumentation() {
         return methodsExcludedFromInstrumentation.get();
     }
@@ -648,21 +673,6 @@ public class CoreConfiguration extends ConfigurationOptionProvider {
 
     public TimeDuration getTraceMethodsDurationThreshold() {
         return traceMethodsDurationThreshold.get();
-    }
-
-    public @Nullable String getPackagesToAppendToBootdelegationProperty() {
-        String value = appendPackagesToBootDelegationProperty.get();
-        if (value != null) {
-            value = value.trim();
-            if (value.isEmpty()) {
-                value = null;
-            }
-        }
-        return value;
-    }
-
-    public boolean useAtlassianNewBootDelegationConfig() {
-        return atlassianNewBootDelegation.get();
     }
 
     public Map<String, String> getGlobalLabels() {
@@ -703,6 +713,22 @@ public class CoreConfiguration extends ConfigurationOptionProvider {
             }
         }
         if (configFileLocation.contains(AGENT_HOME_PLACEHOLDER)) {
+            String agentHome = ElasticApmAgent.getAgentHome();
+            if (agentHome != null) {
+                return configFileLocation.replace(AGENT_HOME_PLACEHOLDER, agentHome);
+            } else {
+                return null;
+            }
+        } else {
+            return configFileLocation;
+        }
+    }
+
+    @Nullable
+    public String getPluginsDir() {
+        @Nullable
+        String configFileLocation = pluginsDirLocation.get();
+        if (configFileLocation != null && configFileLocation.contains(AGENT_HOME_PLACEHOLDER)) {
             String agentHome = ElasticApmAgent.getAgentHome();
             if (agentHome != null) {
                 return configFileLocation.replace(AGENT_HOME_PLACEHOLDER, agentHome);

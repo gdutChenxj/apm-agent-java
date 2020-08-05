@@ -55,7 +55,7 @@ class AsyncTraceMethodInstrumentationTest {
 
     @BeforeEach
     void setUp(TestInfo testInfo) {
-        MockTracer.MockInstrumentationSetup mockInstrumentationSetup = MockTracer.getOrCreateInstrumentationTracer();
+        MockTracer.MockInstrumentationSetup mockInstrumentationSetup = MockTracer.createMockInstrumentationSetup();
         reporter = mockInstrumentationSetup.getReporter();
         ConfigurationRegistry config = mockInstrumentationSetup.getConfig();
         coreConfiguration = config.getConfig(CoreConfiguration.class);
@@ -154,7 +154,7 @@ class AsyncTraceMethodInstrumentationTest {
         }
 
         private Future<?> nonBlockingMethodOnMainThread() {
-            return ExecutorServiceWrapper.wrap(Executors.newFixedThreadPool(1)).submit(TestAsyncTraceMethodsClass.this::methodOnWorkerThread);
+            return Executors.newFixedThreadPool(1).submit(TestAsyncTraceMethodsClass.this::methodOnWorkerThread);
         }
 
         private void methodOnWorkerThread() {

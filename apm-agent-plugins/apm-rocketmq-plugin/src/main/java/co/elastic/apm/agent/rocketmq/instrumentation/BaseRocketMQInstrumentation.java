@@ -26,6 +26,7 @@ package co.elastic.apm.agent.rocketmq.instrumentation;
 
 import co.elastic.apm.agent.bci.ElasticApmInstrumentation;
 import co.elastic.apm.agent.bci.HelperClassManager;
+import co.elastic.apm.agent.bci.TracerAwareInstrumentation;
 import co.elastic.apm.agent.bci.VisibleForAdvice;
 import co.elastic.apm.agent.impl.ElasticApmTracer;
 import co.elastic.apm.agent.rocketmq.helper.RocketMQInstrumentationHelper;
@@ -42,7 +43,7 @@ import org.apache.rocketmq.common.message.MessageQueue;
 import java.util.Arrays;
 import java.util.Collection;
 
-public abstract class BaseRocketMQInstrumentation extends ElasticApmInstrumentation {
+public abstract class BaseRocketMQInstrumentation extends TracerAwareInstrumentation {
 
     @VisibleForAdvice
     public static HelperClassManager<RocketMQInstrumentationHelper<Message, MessageQueue, CommunicationMode, SendCallback,

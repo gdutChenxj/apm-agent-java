@@ -25,6 +25,7 @@
 package co.elastic.apm.agent.report;
 
 import co.elastic.apm.agent.report.ssl.SslUtils;
+import co.elastic.apm.agent.util.GlobalLocks;
 import co.elastic.apm.agent.util.Version;
 import co.elastic.apm.agent.util.VersionUtils;
 import org.slf4j.Logger;
@@ -45,7 +46,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -69,20 +73,25 @@ public class ApmServerClient {
     private static final Logger logger = LoggerFactory.getLogger(ApmServerClient.class);
     private static final String USER_AGENT = "elasticapm-java/" + VersionUtils.getAgentVersion();
     private static final Version VERSION_6_7 = Version.of("6.7.0");
+    private static final Version VERSION_7_9 = Version.of("7.9.0");
     private final ReporterConfiguration reporterConfiguration;
+    @Nullable
     private volatile List<URL> serverUrls;
+    @Nullable
     private volatile Future<Version> apmServerVersion;
     private final AtomicInteger errorCount = new AtomicInteger();
     private final ApmServerHealthChecker healthChecker;
 
     public ApmServerClient(ReporterConfiguration reporterConfiguration) {
-        this(reporterConfiguration, shuffleUrls(reporterConfiguration.getServerUrls()));
-    }
-
-    public ApmServerClient(ReporterConfiguration reporterConfiguration, List<URL> shuffledUrls) {
-        initHttpUrlConnectionClass();
         this.reporterConfiguration = reporterConfiguration;
         this.healthChecker = new ApmServerHealthChecker(this);
+    }
+
+    public void start() {
+        start(shuffleUrls(reporterConfiguration.getServerUrls()));
+    }
+
+    public void start(List<URL> shuffledUrls) {
         this.reporterConfiguration.getServerUrlsOption().addChangeListener(new ConfigurationOption.ChangeListener<List<URL>>() {
             @Override
             public void onChange(ConfigurationOption<?> configurationOption, List<URL> oldValue, List<URL> newValue) {
@@ -93,19 +102,6 @@ public class ApmServerClient {
             }
         });
         setServerUrls(Collections.unmodifiableList(shuffledUrls));
-    }
-
-    /**
-     * A noop method for the sole purpose of loading the HttpUrlConnection class as a side effect, on the main thread,
-     * in order to work around the JULI deadlock reported at https://github.com/elastic/apm-agent-java/issues/954
-     */
-    private void initHttpUrlConnectionClass() {
-        try {
-            new URL("http://localhost:11111").openConnection();
-            new URL("https://localhost:11111").openConnection();
-        } catch (IOException e) {
-            //ignore
-        }
     }
 
     private void setServerUrls(List<URL> serverUrls) {
@@ -122,13 +118,18 @@ public class ApmServerClient {
         return copy;
     }
 
+    @Nullable
     HttpURLConnection startRequest(String relativePath) throws IOException {
-        return startRequestToUrl(appendPathToCurrentUrl(relativePath));
+        URL url = appendPathToCurrentUrl(relativePath);
+        if (url == null) {
+            return null;
+        }
+        return startRequestToUrl(url);
     }
 
     @Nonnull
     private HttpURLConnection startRequestToUrl(URL url) throws IOException {
-        final URLConnection connection = url.openConnection();
+        final URLConnection connection = openUrlConnectionThreadSafely(url);
 
         // change SSL socket factory to support both TLS fallback and disabling certificate validation
         if (connection instanceof HttpsURLConnection) {
@@ -164,9 +165,22 @@ public class ApmServerClient {
         return (HttpURLConnection) connection;
     }
 
-    @Nonnull
+    private URLConnection openUrlConnectionThreadSafely(URL url) throws IOException {
+        GlobalLocks.JUL_INIT_LOCK.lock();
+        try {
+            return url.openConnection();
+        } finally {
+            GlobalLocks.JUL_INIT_LOCK.unlock();
+        }
+    }
+
+    @Nullable
     URL appendPathToCurrentUrl(String apmServerPath) throws MalformedURLException {
-        return appendPath(getCurrentUrl(), apmServerPath);
+        URL currentUrl = getCurrentUrl();
+        if (currentUrl == null) {
+            return null;
+        }
+        return appendPath(currentUrl, apmServerPath);
     }
 
     @Nonnull
@@ -256,6 +270,7 @@ public class ApmServerClient {
     }
 
     public <T> List<T> executeForAllUrls(String path, ConnectionHandler<T> connectionHandler) {
+        List<URL> serverUrls = getServerUrls();
         List<T> results = new ArrayList<>(serverUrls.size());
         for (URL serverUrl : serverUrls) {
             HttpURLConnection connection = null;
@@ -271,7 +286,12 @@ public class ApmServerClient {
         return results;
     }
 
+    @Nullable
     URL getCurrentUrl() {
+        List<URL> serverUrls = getServerUrls();
+        if (serverUrls.isEmpty()) {
+            return null;
+        }
         return serverUrls.get(errorCount.get() % serverUrls.size());
     }
 
@@ -285,7 +305,7 @@ public class ApmServerClient {
         // Copying the URLs instead of rotating serverUrls makes sure that a concurrently happening connection error
         // for a different request does not skip a URL.
         // In other words, it avoids that concurrently running requests influence each other.
-        ArrayList<URL> serverUrlsCopy = new ArrayList<>(serverUrls);
+        ArrayList<URL> serverUrlsCopy = new ArrayList<>(getServerUrls());
         Collections.rotate(serverUrlsCopy, errorCount.get());
         return serverUrlsCopy;
     }
@@ -295,14 +315,32 @@ public class ApmServerClient {
     }
 
     List<URL> getServerUrls() {
-        return this.serverUrls;
+        if (serverUrls == null) {
+            throw new IllegalStateException("APM Server client not yet initialized");
+        }
+        return serverUrls;
     }
 
     public boolean supportsNonStringLabels() {
         return isAtLeast(VERSION_6_7);
     }
 
+    public boolean supportsLogsEndpoint() {
+        return isAtLeast(VERSION_7_9);
+    }
+
+    @Nullable
+    Version getApmServerVersion(long timeout, TimeUnit timeUnit) throws InterruptedException, ExecutionException, TimeoutException {
+        if (apmServerVersion != null) {
+            return apmServerVersion.get(timeout, timeUnit);
+        }
+        return null;
+    }
+
     public boolean isAtLeast(Version apmServerVersion) {
+        if (this.apmServerVersion == null) {
+            throw new IllegalStateException("Called before init event");
+        }
         try {
             Version localApmServerVersion = this.apmServerVersion.get();
             if (localApmServerVersion == null) {

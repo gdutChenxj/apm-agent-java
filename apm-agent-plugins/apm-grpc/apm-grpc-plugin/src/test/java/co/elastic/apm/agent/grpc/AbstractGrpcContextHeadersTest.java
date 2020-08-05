@@ -54,13 +54,7 @@ public abstract class AbstractGrpcContextHeadersTest extends AbstractInstrumenta
 
     @AfterEach
     void afterEach() throws Exception {
-        // make sure we do not leave anything behind
-        try {
-            reporter.assertRecycledAfterDecrementingReferences();
-            reporter.reset();
-        } finally {
-            app.stop();
-        }
+        app.stop();
     }
 
     @Test
@@ -92,7 +86,7 @@ public abstract class AbstractGrpcContextHeadersTest extends AbstractInstrumenta
         Transaction transaction2 = transactions.stream()
             .filter((t) -> !t.equals(transaction1))
             .findFirst()
-            .orElseThrow();
+            .orElseThrow(() -> null);
 
         Span span = reporter.getFirstSpan();
 

@@ -27,9 +27,9 @@ package co.elastic.apm.spring.boot;
 import co.elastic.apm.agent.MockReporter;
 import co.elastic.apm.agent.MockTracer;
 import co.elastic.apm.agent.bci.ElasticApmAgent;
+import co.elastic.apm.agent.impl.context.web.WebConfiguration;
 import co.elastic.apm.agent.impl.transaction.Transaction;
 import co.elastic.apm.agent.report.ReporterConfiguration;
-import co.elastic.apm.agent.impl.context.web.WebConfiguration;
 import co.elastic.apm.api.ElasticApm;
 import net.bytebuddy.agent.ByteBuddyAgent;
 import org.junit.AfterClass;
@@ -74,7 +74,7 @@ public abstract class AbstractSpringBootTest {
 
     @BeforeClass
     public static void beforeClass() {
-        MockTracer.MockInstrumentationSetup mockInstrumentationSetup = MockTracer.getOrCreateInstrumentationTracer();
+        MockTracer.MockInstrumentationSetup mockInstrumentationSetup = MockTracer.createMockInstrumentationSetup();
         config = mockInstrumentationSetup.getConfig();
         reporter = mockInstrumentationSetup.getReporter();
         ElasticApmAgent.initInstrumentation(mockInstrumentationSetup.getTracer(), ByteBuddyAgent.install());
@@ -108,6 +108,8 @@ public abstract class AbstractSpringBootTest {
         assertThat(transaction.getContext().getUser().getEmail()).isEqualTo("email");
         assertThat(transaction.getContext().getUser().getUsername()).isEqualTo("username");
         assertThat(transaction.getTraceContext().getServiceName()).isEqualTo("spring-boot-test");
+        assertThat(transaction.getFrameworkName()).isEqualTo("Spring Web MVC");
+        assertThat(transaction.getFrameworkVersion()).isEqualTo("5.1.9.RELEASE");
     }
 
     @Test
@@ -117,6 +119,7 @@ public abstract class AbstractSpringBootTest {
             .contains("// empty test script");
 
         assertThat(reporter.getFirstTransaction(500).getNameAsString()).isEqualTo("ResourceHttpRequestHandler");
+        assertThat(reporter.getFirstTransaction().getFrameworkName()).isEqualTo("Spring Web MVC");
         assertThat(reporter.getFirstTransaction().getContext().getUser().getUsername()).isEqualTo("username");
     }
 

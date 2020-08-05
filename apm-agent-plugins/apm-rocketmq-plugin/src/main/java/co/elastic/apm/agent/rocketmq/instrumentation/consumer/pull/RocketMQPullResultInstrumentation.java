@@ -77,7 +77,7 @@ public class RocketMQPullResultInstrumentation extends BaseRocketMQInstrumentati
         @Advice.OnMethodExit(suppress = Throwable.class, onThrowable = Throwable.class)
         private static void onExit(@Advice.Thrown Throwable thrown,
                                    @Advice.Return(readOnly = false) PullResult pullResult) {
-            if (tracer == null || !tracer.isRunning() || tracer.currentTransaction() != null) {
+            if (!tracer.isRunning() || tracer.currentTransaction() != null) {
                 return;
             }
 

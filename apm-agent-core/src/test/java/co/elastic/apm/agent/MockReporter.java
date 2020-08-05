@@ -42,7 +42,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.networknt.schema.JsonSchema;
 import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.ValidationMessage;
-import org.awaitility.core.ConditionFactory;
 import org.awaitility.core.ThrowingRunnable;
 
 import java.io.IOException;
@@ -56,11 +55,10 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Predicate;
+import java.util.concurrent.locks.LockSupport;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -113,6 +111,9 @@ public class MockReporter implements Reporter {
     public void disableDestinationAddressCheck() {
         disableDestinationAddressCheck = true;
     }
+
+    @Override
+    public void start() {}
 
     @Override
     public synchronized void report(Transaction transaction) {
@@ -184,6 +185,10 @@ public class MockReporter implements Reporter {
         return Collections.unmodifiableList(transactions);
     }
 
+    public synchronized int getNumReportedTransactions() {
+        return transactions.size();
+    }
+
     public synchronized Transaction getFirstTransaction() {
         assertThat(transactions)
             .describedAs("at least one transaction expected, none have been reported (yet)")
@@ -192,8 +197,7 @@ public class MockReporter implements Reporter {
     }
 
     public Transaction getFirstTransaction(long timeoutMs) {
-        awaitTimeout(timeoutMs)
-            .untilAsserted(() -> assertThat(getTransactions()).isNotEmpty());
+        awaitUntilAsserted(timeoutMs, () -> assertThat(getTransactions()).isNotEmpty());
         return getFirstTransaction();
     }
 
@@ -204,24 +208,11 @@ public class MockReporter implements Reporter {
     }
 
     public void assertNoTransaction(long timeoutMs) {
-        awaitTimeout(timeoutMs)
-            .untilAsserted(this::assertNoTransaction);
-    }
-
-    public void awaitUntilAsserted(long timeoutMs, ThrowingRunnable assertion){
-        awaitTimeout(timeoutMs)
-            .untilAsserted(assertion);
-    }
-
-    private static ConditionFactory awaitTimeout(long timeoutMs) {
-        return await()
-            .pollInterval(1, TimeUnit.MILLISECONDS)
-            .timeout(timeoutMs, TimeUnit.MILLISECONDS);
+        awaitUntilAsserted(timeoutMs, this::assertNoTransaction);
     }
 
     public Span getFirstSpan(long timeoutMs) {
-        awaitTimeout(timeoutMs)
-            .untilAsserted(() -> assertThat(getSpans()).isNotEmpty());
+        awaitUntilAsserted(timeoutMs, () -> assertThat(getSpans()).isNotEmpty());
         return getFirstSpan();
     }
 
@@ -232,10 +223,17 @@ public class MockReporter implements Reporter {
     }
 
     public void assertNoSpan(long timeoutMs) {
-        awaitTimeout(timeoutMs)
-            .untilAsserted(() -> assertThat(getSpans()).isEmpty());
+        awaitUntilAsserted(timeoutMs, () -> assertThat(getSpans()).isEmpty());
 
         assertNoSpan();
+    }
+
+    public void awaitTransactionCount(int count) {
+        awaitUntilAsserted(() -> assertThat(getNumReportedTransactions()).isEqualTo(count));
+    }
+
+    public void awaitSpanCount(int count) {
+        awaitUntilAsserted(() -> assertThat(getNumReportedSpans()).isEqualTo(count));
     }
 
     @Override
@@ -261,6 +259,10 @@ public class MockReporter implements Reporter {
 
     public synchronized List<Span> getSpans() {
         return Collections.unmodifiableList(spans);
+    }
+
+    public synchronized int getNumReportedSpans() {
+        return spans.size();
     }
 
     public synchronized List<ErrorCapture> getErrors() {
@@ -320,6 +322,11 @@ public class MockReporter implements Reporter {
     }
 
     public synchronized void reset() {
+        assertRecycledAfterDecrementingReferences();
+        resetWithoutRecycling();
+    }
+
+    public synchronized void resetWithoutRecycling() {
         transactions.clear();
         spans.clear();
         errors.clear();
@@ -341,10 +348,12 @@ public class MockReporter implements Reporter {
      */
     public synchronized void assertRecycledAfterDecrementingReferences() {
 
+        List<Transaction> transactions = getTransactions();
         List<Transaction> transactionsToFlush = transactions.stream()
             .filter(t -> !hasEmptyTraceContext(t))
             .collect(Collectors.toList());
 
+        List<Span> spans = getSpans();
         List<Span> spansToFlush = spans.stream()
             .filter(s-> !hasEmptyTraceContext(s))
             .collect(Collectors.toList());
@@ -352,27 +361,61 @@ public class MockReporter implements Reporter {
         transactionsToFlush.forEach(Transaction::decrementReferences);
         spansToFlush.forEach(Span::decrementReferences);
 
-        // after decrement, all transactions and spans should have been recycled
-        transactions.forEach(t -> {
-            assertThat(hasEmptyTraceContext(t))
-                .describedAs("should have empty trace context : %s", t)
-                .isTrue();
-            assertThat(t.isReferenced())
-                .describedAs("should not have any reference left, but has %d : %s", t.getReferenceCount(), t)
-                .isFalse();
-        });
-        spans.forEach(s -> {
-            assertThat(hasEmptyTraceContext(s))
-                .describedAs("should have empty trace context : %s", s)
-                .isTrue();
-            assertThat(s.isReferenced())
-                .describedAs("should not have any reference left, but has %d : %s", s.getReferenceCount(), s)
-                .isFalse();
+        awaitUntilAsserted(() -> {
+            spans.forEach(s -> {
+                assertThat(s.isReferenced())
+                    .describedAs("should not have any reference left, but has %d : %s", s.getReferenceCount(), s)
+                    .isFalse();
+                assertThat(hasEmptyTraceContext(s))
+                    .describedAs("should have empty trace context : %s", s)
+                    .isTrue();
+            });
+            transactions.forEach(t -> {
+                assertThat(t.isReferenced())
+                    .describedAs("should not have any reference left, but has %d : %s", t.getReferenceCount(), t)
+                    .isFalse();
+                assertThat(hasEmptyTraceContext(t))
+                    .describedAs("should have empty trace context : %s", t)
+                    .isTrue();
+            });
         });
 
         // errors are recycled directly because they have no reference counter
         errors.forEach(ErrorCapture::recycle);
     }
+
+    /**
+     * Uses a timeout of 1s
+     *
+     * @see #awaitUntilAsserted(long, ThrowingRunnable)
+     */
+    public void awaitUntilAsserted(ThrowingRunnable runnable) {
+        awaitUntilAsserted(1000, runnable);
+    }
+
+    /**
+     * This is deliberately not using {@link org.awaitility.Awaitility} as it uses an {@link java.util.concurrent.Executor} for polling.
+     * This is an issue when testing instrumentations that instrument {@link java.util.concurrent.Executor}.
+     *
+     * @param timeoutMs the timeout of the condition
+     * @param runnable  a runnable that trows an exception if the condition is not met
+     */
+    public void awaitUntilAsserted(long timeoutMs, ThrowingRunnable runnable) {
+        Throwable thrown = null;
+        for (int i = 0; i < timeoutMs; i += 5) {
+            try {
+                runnable.run();
+                thrown = null;
+            } catch (Throwable e) {
+                thrown = e;
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(5));
+            }
+        }
+        if (thrown != null) {
+            throw new RuntimeException(String.format("Condition not fulfilled within %d ms", timeoutMs), thrown);
+        }
+    }
+
 
     private static boolean hasEmptyTraceContext(AbstractSpan<?> item) {
         return item.getTraceContext().getId().isEmpty();

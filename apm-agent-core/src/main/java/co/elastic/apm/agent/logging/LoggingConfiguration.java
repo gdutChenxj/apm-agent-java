@@ -24,15 +24,16 @@
  */
 package co.elastic.apm.agent.logging;
 
-import co.elastic.apm.agent.bci.ElasticApmAgent;
-import org.slf4j.impl.SimpleLogger;
+import co.elastic.apm.agent.configuration.converter.ByteValue;
+import co.elastic.apm.agent.configuration.converter.ByteValueConverter;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.core.config.Configurator;
+import org.apache.logging.log4j.status.StatusLogger;
 import org.stagemonitor.configuration.ConfigurationOption;
 import org.stagemonitor.configuration.ConfigurationOptionProvider;
 import org.stagemonitor.configuration.source.ConfigurationSource;
 
-import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
-import java.io.File;
 import java.util.List;
 
 /**
@@ -43,7 +44,7 @@ import java.util.List;
  * {@link org.slf4j.LoggerFactory#getLogger(Class)}.
  * That's why we don't read the values from the {@link ConfigurationOption} fields but
  * iterate over the {@link ConfigurationSource}s manually to read the values
- * (see {@link #getValue(String, List, String)}).
+ * (see {@link Log4j2ConfigurationFactory#getValue}).
  * </p>
  * <p>
  * It still makes sense to extend {@link ConfigurationOptionProvider} and register this class as a service,
@@ -52,16 +53,32 @@ import java.util.List;
  */
 public class LoggingConfiguration extends ConfigurationOptionProvider {
 
-    private static final String SYSTEM_OUT = "System.out";
-    private static final String LOG_LEVEL_KEY = "log_level";
-    private static final String LOG_FILE_KEY = "log_file";
-    private static final String DEFAULT_LOG_FILE = SYSTEM_OUT;
+    public static final String SYSTEM_OUT = "System.out";
+    static final String LOG_LEVEL_KEY = "log_level";
+    static final String LOG_FILE_KEY = "log_file";
+    static final String LOG_FILE_SIZE_KEY = "log_file_size";
+    static final String DEFAULT_LOG_FILE = SYSTEM_OUT;
 
     private static final String LOGGING_CATEGORY = "Logging";
     public static final String AGENT_HOME_PLACEHOLDER = "_AGENT_HOME_";
-    private static final String DEPRECATED_LOG_LEVEL_KEY = "logging.log_level";
-    private static final String DEPRECATED_LOG_FILE_KEY = "logging.log_file";
+    static final String DEPRECATED_LOG_LEVEL_KEY = "logging.log_level";
+    static final String DEPRECATED_LOG_FILE_KEY = "logging.log_file";
+    static final String DEFAULT_MAX_SIZE = "50mb";
+    static final String SHIP_AGENT_LOGS = "ship_agent_logs";
+    static final String LOG_FORMAT_SOUT_KEY = "log_format_sout";
+    public static final String LOG_FORMAT_FILE_KEY = "log_format_file";
+    static final String INITIAL_LISTENERS_LEVEL = "log4j2.StatusLogger.level";
+    static final String INITIAL_STATUS_LOGGER_LEVEL = "org.apache.logging.log4j.simplelog.StatusLogger.level";
+    static final String DEFAULT_LISTENER_LEVEL = "Log4jDefaultStatusLevel";
 
+    /**
+     * We don't directly access most logging configuration values through the ConfigurationOption instance variables.
+     * That would require the configuration registry to be initialized already.
+     * However, the registry initializes logging by declaring a static final logger variable.
+     * In order to break up the cyclic dependency and to not accidentally initialize logging before we had the chance to configure the logging,
+     * we manually resolve these options.
+     * See {@link Log4j2ConfigurationFactory#getValue}
+     */
     @SuppressWarnings("unused")
     public ConfigurationOption<LogLevel> logLevel = ConfigurationOption.enumOption(LogLevel.class)
         .key(LOG_LEVEL_KEY)
@@ -74,7 +91,7 @@ public class LoggingConfiguration extends ConfigurationOptionProvider {
         .addChangeListener(new ConfigurationOption.ChangeListener<LogLevel>() {
             @Override
             public void onChange(ConfigurationOption<?> configurationOption, LogLevel oldValue, LogLevel newValue) {
-                setLogLevel(newValue.toString());
+                setLogLevel(newValue);
             }
         })
         .buildWithDefault(LogLevel.INFO);
@@ -92,7 +109,8 @@ public class LoggingConfiguration extends ConfigurationOptionProvider {
             "the logs are sent to standard out.\n" +
             "\n" +
             "NOTE: When logging to a file,\n" +
-            "it's content is deleted when the application starts.")
+            "the log will be formatted in new-line-delimited JSON.\n" +
+            "When logging to std out, the log will be formatted as plain-text.")
         .dynamic(false)
         .buildWithDefault(DEFAULT_LOG_FILE);
 
@@ -117,67 +135,121 @@ public class LoggingConfiguration extends ConfigurationOptionProvider {
         })
         .buildWithDefault(false);
 
-    public static void init(List<ConfigurationSource> sources) {
-        setLogLevel(getValue(LOG_LEVEL_KEY, sources,
-            getValue(DEPRECATED_LOG_LEVEL_KEY, sources, LogLevel.INFO.toString())));
-        setLogFileLocation(ElasticApmAgent.getAgentHome(), getValue(LOG_FILE_KEY, sources,
-            getValue(DEPRECATED_LOG_FILE_KEY, sources, DEFAULT_LOG_FILE)));
-    }
+    @SuppressWarnings("unused")
+    public ConfigurationOption<ByteValue> logFileMaxSize = ByteValueConverter.byteOption()
+        .key(LOG_FILE_SIZE_KEY)
+        .configurationCategory(LOGGING_CATEGORY)
+        .description("The size of the log file.\n" +
+            "\n" +
+            //"To support <<config-ship-agent-logs,shipping the logs>> to APM Server,\n" +
+            "The agent always keeps one history file so that the max total log file size is twice the value of this setting.\n")
+        .dynamic(false)
+        .tags("added[1.17.0]")
+        .buildWithDefault(ByteValue.of(DEFAULT_MAX_SIZE));
 
-    /**
-     * The ConfigurationRegistry uses and thereby initializes a logger,
-     * so we can't use it here initialize the {@link ConfigurationOption}s in this class.
-     */
-    private static String getValue(String key, List<ConfigurationSource> sources, String defaultValue) {
-        for (ConfigurationSource source : sources) {
-            final String value = source.getValue(key);
-            if (value != null) {
-                return value;
-            }
+    private final ConfigurationOption<Boolean> shipAgentLogs = ConfigurationOption.booleanOption()
+        .key(SHIP_AGENT_LOGS)
+        .configurationCategory(LOGGING_CATEGORY)
+        .description("This helps you to centralize your agent logs by automatically sending them to APM Server (requires APM Server 7.9+).\n" +
+            "Use the Kibana Logs App to see the logs from all of your agents.\n" +
+            "\n" +
+            "If <<config-log-file,`log_file`>> is set to a real file location (as opposed to `System.out`),\n" +
+            "this file will be shipped to the APM Server by the agent.\n" +
+            "Note that <<config-log-format-file,`log_format_file`>> needs to be set to `JSON` when this option is enabled.\n" +
+            "\n" +
+            "If APM Server is temporarily not available, the agent will resume sending where it left off as soon as the server is back up again.\n" +
+            "The amount of logs that can be buffered is at least <<config-log-file-size,`log_file_size`>>.\n" +
+            "If the application crashes or APM Server is not available when shutting down,\n" +
+            "the agent will resume shipping the log file when the application restarts.\n" +
+            "\n" +
+            "Resume on restart does not work when the log is inside an ephemeral container.\n" +
+            "Consider mounting the log file to the host or use Filebeat if you need the extra reliability in this case.\n" +
+            "\n" +
+            "If <<config-log-file,`log_file`>> is set to `System.out`,\n" +
+            "the agent will additionally log into a temp file which is then sent to APM Server.\n" +
+            "This log's size is determined by <<config-log-file-size,`log_file_size`>> and will be deleted on shutdown.\n" +
+            "This means that logs that could not be sent before the application terminates are lost.")
+        .dynamic(false)
+        .tags("added[not officially added yet]", "internal")
+        .buildWithDefault(false);
+
+    @SuppressWarnings("unused")
+    public ConfigurationOption<LogFormat> logFormatSout = ConfigurationOption.enumOption(LogFormat.class)
+        .key(LOG_FORMAT_SOUT_KEY)
+        .configurationCategory(LOGGING_CATEGORY)
+        .description("Defines the log format when logging to `System.out`.\n" +
+            "\n" +
+            "When set to `JSON`, the agent will format the logs in an https://github.com/elastic/ecs-logging-java[ECS-compliant JSON format]\n" +
+            "where each log event is serialized as a single line.")
+        .tags("added[1.17.0]")
+        .buildWithDefault(LogFormat.PLAIN_TEXT);
+
+    @SuppressWarnings("unused")
+    public ConfigurationOption<LogFormat> logFormatFile = ConfigurationOption.enumOption(LogFormat.class)
+        .key(LOG_FORMAT_FILE_KEY)
+        .configurationCategory(LOGGING_CATEGORY)
+        .description("Defines the log format when logging to a file.\n" +
+            "\n" +
+            "When set to `JSON`, the agent will format the logs in an https://github.com/elastic/ecs-logging-java[ECS-compliant JSON format]\n" +
+            "where each log event is serialized as a single line.\n"
+            //+ "\n" +
+            //"If <<config-ship-agent-logs,`ship_agent_logs`>> is enabled,\n" +
+            //"the value has to be `JSON`."
+        )
+        .tags("added[1.17.0]")
+        .buildWithDefault(LogFormat.PLAIN_TEXT);
+
+    public static void init(List<ConfigurationSource> sources, String ephemeralId) {
+        // The initialization of log4j may produce errors if the traced application uses log4j settings (for
+        // example - through file in the classpath or System properties) that configures specific properties for
+        // loading classes by name. Since we shade our usage of log4j, such non-shaded classes may not (and should not)
+        // be found on the classpath.
+        // All handled Exceptions should not prevent us from using log4j further, as the system falls back to a default
+        // which we expect anyway. We take a calculated risk of ignoring such errors only through initialization time,
+        // assuming that errors that will make the logging system non-usable won't be handled.
+        String initialListenersLevel = System.setProperty(INITIAL_LISTENERS_LEVEL, "OFF");
+        String initialStatusLoggerLevel = System.setProperty(INITIAL_STATUS_LOGGER_LEVEL, "OFF");
+        String defaultListenerLevel = System.setProperty(DEFAULT_LISTENER_LEVEL, "OFF");
+        try {
+            Configurator.initialize(new Log4j2ConfigurationFactory(sources, ephemeralId).getConfiguration());
+        } catch (Throwable throwable) {
+            System.err.println("Failure during initialization of agent's log4j system: " + throwable.getMessage());
+        } finally {
+            restoreSystemProperty(INITIAL_LISTENERS_LEVEL, initialListenersLevel);
+            restoreSystemProperty(INITIAL_STATUS_LOGGER_LEVEL, initialStatusLoggerLevel);
+            restoreSystemProperty(DEFAULT_LISTENER_LEVEL, defaultListenerLevel);
+            StatusLogger.getLogger().setLevel(Level.ERROR);
         }
-        return defaultValue;
     }
 
-    private static void setLogLevel(@Nullable String level) {
-        System.setProperty(SimpleLogger.LOG_KEY_PREFIX + "co.elastic.apm", level != null ? level : LogLevel.INFO.toString());
-        System.setProperty(SimpleLogger.LOG_KEY_PREFIX + "co.elastic.apm.agent.shaded", LogLevel.OFF.toString().equals(level) ? level : LogLevel.WARN.toString());
-        System.setProperty(SimpleLogger.SHOW_DATE_TIME_KEY, Boolean.TRUE.toString());
-        System.setProperty(SimpleLogger.DATE_TIME_FORMAT_KEY, "yyyy-MM-dd HH:mm:ss.SSS");
-    }
-
-    private static void setLogFileLocation(@Nullable String agentHome, String logFile) {
-        if (SYSTEM_OUT.equalsIgnoreCase(logFile)) {
-            System.setProperty(SimpleLogger.LOG_FILE_KEY, SYSTEM_OUT);
+    private static void restoreSystemProperty(String key, @Nullable String originalValue) {
+        if (originalValue != null) {
+            System.setProperty(key, originalValue);
         } else {
-            System.setProperty(SimpleLogger.LOG_FILE_KEY, getActualLogFile(agentHome, logFile));
+            System.clearProperty(key);
         }
     }
 
-    @Nonnull
-    static String getActualLogFile(@Nullable String agentHome, String logFile) {
-        if (logFile.contains(AGENT_HOME_PLACEHOLDER)) {
-            if (agentHome == null) {
-                System.err.println("Could not resolve " + AGENT_HOME_PLACEHOLDER + ". Falling back to System.out.");
-                return SYSTEM_OUT;
-            } else {
-                logFile = logFile.replace(AGENT_HOME_PLACEHOLDER, agentHome);
-            }
+    public String getLogFile() {
+        return logFile.get();
+    }
+
+    private static void setLogLevel(@Nullable LogLevel level) {
+        if (level == null) {
+            level = LogLevel.INFO;
         }
-        logFile = new File(logFile).getAbsolutePath();
-        final File logDir = new File(logFile).getParentFile();
-        if (!logDir.exists()) {
-            logDir.mkdir();
-        }
-        if (!logDir.canWrite()) {
-            System.err.println("Log file " + logFile + " is not writable. Falling back to System.out.");
-            return SYSTEM_OUT;
-        }
-        System.out.println("Writing Elastic APM logs to " + logFile);
-        return logFile;
+        Configurator.setRootLevel(org.apache.logging.log4j.Level.toLevel(level.toString(), org.apache.logging.log4j.Level.INFO));
     }
 
     public boolean isLogCorrelationEnabled() {
         return logCorrelationEnabled.get();
     }
 
+    public boolean isShipAgentLogs() {
+        return shipAgentLogs.get();
+    }
+
+    public LogFormat getLogFormatFile() {
+        return logFormatFile.get();
+    }
 }

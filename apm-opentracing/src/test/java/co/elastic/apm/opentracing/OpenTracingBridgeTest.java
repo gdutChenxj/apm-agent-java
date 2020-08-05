@@ -60,7 +60,9 @@ class OpenTracingBridgeTest extends AbstractInstrumentationTest {
     @BeforeEach
     void setUp() {
         apmTracer = new ElasticApmTracer();
-        reporter.reset();
+        // OT always leaks the spans
+        // see co.elastic.apm.agent.opentracing.impl.ApmSpanBuilderInstrumentation.CreateSpanInstrumentation.doCreateTransactionOrSpan
+        disableRecyclingValidation();
     }
 
     @AfterEach
@@ -83,6 +85,7 @@ class OpenTracingBridgeTest extends AbstractInstrumentationTest {
         assertThat(reporter.getTransactions()).hasSize(1);
         assertThat(reporter.getFirstTransaction().getDuration()).isEqualTo(1000);
         assertThat(reporter.getFirstTransaction().getNameAsString()).isEqualTo("test");
+        assertThat(reporter.getFirstTransaction().getFrameworkName()).isEqualTo("OpenTracing");
     }
 
     @Test
@@ -205,6 +208,7 @@ class OpenTracingBridgeTest extends AbstractInstrumentationTest {
         // manually finish span
         scope.span().finish(1);
         assertThat(reporter.getTransactions()).hasSize(1);
+        assertThat(reporter.getFirstTransaction().getFrameworkName()).isEqualTo("OpenTracing");
         assertThat(reporter.getFirstTransaction().getDuration()).isEqualTo(1);
         assertThat(reporter.getFirstTransaction().getNameAsString()).isEqualTo("test");
     }
@@ -224,6 +228,7 @@ class OpenTracingBridgeTest extends AbstractInstrumentationTest {
         final co.elastic.apm.agent.impl.transaction.Span nestedSpan = reporter.getSpans().get(0);
         assertThat(transaction.getDuration()).isGreaterThan(0);
         assertThat(transaction.getNameAsString()).isEqualTo("transaction");
+        assertThat(transaction.getFrameworkName()).isEqualTo("OpenTracing");
         assertThat(reporter.getSpans()).hasSize(2);
         assertThat(span.getNameAsString()).isEqualTo("span");
         assertThat(span.isChildOf(transaction)).isTrue();
@@ -254,6 +259,7 @@ class OpenTracingBridgeTest extends AbstractInstrumentationTest {
         final co.elastic.apm.agent.impl.transaction.Span nestedSpan = reporter.getSpans().get(0);
         assertThat(transaction.getDuration()).isGreaterThan(0);
         assertThat(transaction.getNameAsString()).isEqualTo("transaction");
+        assertThat(transaction.getFrameworkName()).isEqualTo("OpenTracing");
         assertThat(reporter.getSpans()).hasSize(2);
         assertThat(span.getNameAsString()).isEqualTo("span");
         assertThat(span.isChildOf(transaction)).isTrue();
@@ -556,7 +562,7 @@ class OpenTracingBridgeTest extends AbstractInstrumentationTest {
         spanBuilder.start().finish();
         assertThat(reporter.getTransactions()).hasSize(1);
         final Transaction transaction = reporter.getFirstTransaction();
-        reporter.reset();
+        reporter.resetWithoutRecycling();
         return transaction;
     }
 
@@ -571,7 +577,7 @@ class OpenTracingBridgeTest extends AbstractInstrumentationTest {
         assertThat(reporter.getTransactions()).hasSize(1);
         assertThat(reporter.getSpans()).hasSize(1);
         final co.elastic.apm.agent.impl.transaction.Span span = reporter.getFirstSpan();
-        reporter.reset();
+        reporter.resetWithoutRecycling();
         return span;
     }
 }
